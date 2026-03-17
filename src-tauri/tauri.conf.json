@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Voice Humanizer",
   "version": "1.0.0",
-  "identifier": "com.voicehumanizer.app",
+  "identifier": "com.voicehumanizer.humanizer",
   "build": {
     "frontendDist": "../dist",
     "beforeDevCommand": "npm run dev:web",

@@ -16,7 +16,7 @@ function ModalIcon({ children }) {
   );
 }
 
-export default function StyleModal({ hasProfile, loading, health, profileLabel, sampleCount = 0, onTrainProfile, onClose }) {
+export default function StyleModal({ hasProfile, loading, health, profileLabel, sampleCount = 0, sampleEntries = [], profile = null, onTrainProfile, onClose }) {
   const initialSlots = DEFAULT_SLOTS.slice(0, 1).map((slot, index) => normalizeSampleSlot(slot, index + 1));
   const [trainSlots, setTrainSlots] = useState(initialSlots);
   const [poolInput, setPoolInput] = useState("");
@@ -68,12 +68,21 @@ export default function StyleModal({ hasProfile, loading, health, profileLabel, 
         return;
       }
       const draft = await load(STYLE_MODAL_DRAFT_KEY);
-      if (!draft || typeof draft !== "object") return;
+      if (!draft || typeof draft !== "object") {
+        if (sampleEntries.length) {
+          setTrainSlots(sampleEntries.map((slot, index) => normalizeSampleSlot(slot, index + 1)));
+        }
+        return;
+      }
       if (Array.isArray(draft.trainSlots) && draft.trainSlots.length) {
         const normalizedSlots = draft.trainSlots.map((slot, index) => normalizeSampleSlot(slot, index + 1));
         setTrainSlots(normalizedSlots);
       } else if (Array.isArray(draft.trainSlots) && !draft.trainSlots.length) {
-        setTrainSlots(initialSlots);
+        if (sampleEntries.length) {
+          setTrainSlots(sampleEntries.map((slot, index) => normalizeSampleSlot(slot, index + 1)));
+        } else {
+          setTrainSlots(initialSlots);
+        }
       }
       if (typeof draft.poolInput === "string") setPoolInput(draft.poolInput);
       if (typeof draft.poolType === "string") setPoolType(resolveSampleType(draft.poolType));
@@ -174,6 +183,42 @@ export default function StyleModal({ hasProfile, loading, health, profileLabel, 
               </span>
             </Card.Content>
           </Card>
+        ) : null}
+
+        {hasProfile && profile ? (
+          <details className="debug-log" style={{ borderRadius: 16, overflow: "hidden" }}>
+            <summary className="diagnostic-log-summary" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", cursor: "pointer", listStyle: "none", background: "rgba(255,255,255,0.6)", borderRadius: 16 }}>
+              <span className="text-mono" style={{ fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase" }}>Profile Analysis</span>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.5 }}>
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </summary>
+            <div className="panel-grid p-3" style={{ paddingTop: 10 }}>
+              {profile.summary && (
+                <div className="debug-block">
+                  <p className="panel-title" style={{ marginBottom: 4 }}>Summary</p>
+                  <p className="debug-block-content" style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>{profile.summary}</p>
+                </div>
+              )}
+              <div className="diagnostic-log-detail-grid">
+                {[
+                  ["Tone", profile.tone],
+                  ["Emotional Register", profile.emotionalRegister],
+                  ["Vocabulary", profile.vocabulary],
+                  ["Perspective", profile.perspective],
+                  ["Sentence Structure", profile.sentenceStructure],
+                  ["Rhythm", profile.rhythm],
+                  ["Punctuation Habits", profile.punctuationHabits],
+                  ["Quirks", profile.quirks],
+                ].filter(([, val]) => val).map(([label, val]) => (
+                  <div key={label} className="debug-block">
+                    <p className="panel-title" style={{ marginBottom: 4 }}>{label}</p>
+                    <p className="debug-block-content" style={{ margin: 0 }}>{val}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </details>
         ) : null}
 
         <Card className="app-card" radius="lg">

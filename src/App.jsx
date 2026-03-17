@@ -45,6 +45,7 @@ import {
   outputLooksLikeAnsweredPrompt,
 } from "./features/humanize/promptGuards.js";
 import { useProcessLog } from "./features/process/useProcessLog.js";
+import { filterProfileForContext, describeProfileFilter } from "./lib/profileFilter.js";
 
 // Utils
 import {
@@ -1115,8 +1116,11 @@ export default function App() {
     try {
       pushProcessStep("Validating profile and source text.");
       if (!(await ensureApiKeyReady("rewriting text"))) return;
+      const filteredProfile = filterProfileForContext(activeProfile.profile, { toneLevel, formatPreset, mode });
+      const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
+      pushProcessStep(filterMsg, "info", filterDetail);
       const basePrompt = applyPromptDecorators(
-        HUMANIZE_SYS(activeProfile.profile, toneLevel, stripCliches ? cliches : BASE_CLICHES.slice(0,10))
+        HUMANIZE_SYS(filteredProfile, toneLevel, stripCliches ? cliches : BASE_CLICHES.slice(0,10))
       );
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
@@ -1198,10 +1202,13 @@ export default function App() {
     try {
       pushProcessStep("Validating profile and source text.");
       if (!(await ensureApiKeyReady("expanding text"))) return;
+      const filteredProfile = filterProfileForContext(activeProfile.profile, { toneLevel, formatPreset, mode });
+      const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
+      pushProcessStep(filterMsg, "info", filterDetail);
       startOutputStream();
       pushProcessStep("Preparing prompt and opening model stream.");
       let loggedFirstChunk = false;
-      const basePrompt = applyPromptDecorators(ELABORATE_SYS(activeProfile.profile, toneLevel, elabDepth));
+      const basePrompt = applyPromptDecorators(ELABORATE_SYS(filteredProfile, toneLevel, elabDepth));
       const sessionContextBlock = buildSessionContextBlock(sessionIdOverride);
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
@@ -1586,6 +1593,8 @@ export default function App() {
           health={health}
           profileLabel={PROFILE_OPTIONS.find((profile) => profile.id === activeProfileId)?.label || activeProfile?.name}
           sampleCount={activeProfile?.sampleEntries?.length || activeProfile?.sampleCount || 0}
+          sampleEntries={activeProfile?.sampleEntries || []}
+          profile={activeProfile?.profile || null}
           onTrainProfile={trainProfile}
           onClose={() => setStyleModalOpen(false)}
         />
