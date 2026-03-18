@@ -6,6 +6,8 @@ import { formatRelativeTime } from "../utils/format.js";
 export default function Topbar({
   activeProfileId,
   onProfileChange,
+  customProfiles,
+  onAddProfile,
   hasProfile,
   activeProfile,
   backupStatus,
@@ -50,8 +52,18 @@ export default function Topbar({
                 <NativeSelect
                   aria-label="Profile"
                   value={activeProfileId}
-                  onChange={(e) => onProfileChange(e.target.value)}
-                  data={PROFILE_OPTIONS.map((profile) => ({ value: profile.id, label: profile.label }))}
+                  onChange={(e) => {
+                    if (e.target.value === "__add_new__") {
+                      onAddProfile();
+                    } else {
+                      onProfileChange(e.target.value);
+                    }
+                  }}
+                  data={[
+                    ...PROFILE_OPTIONS.map((p) => ({ value: p.id, label: p.label })),
+                    ...(customProfiles || []).map((p) => ({ value: p.id, label: p.label })),
+                    { value: "__add_new__", label: "＋ Add profile…" },
+                  ]}
                   className="app-select-wrap"
                   styles={{ input: { minWidth: 220 } }}
                 />

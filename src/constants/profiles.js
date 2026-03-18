@@ -3,6 +3,7 @@ export const STYLE_MODAL_DRAFT_KEY = "style-modal-draft-v1";
 export const PRIMARY_PROFILE_ID = "primary";
 export const MODEL_PREF_KEY = "selected-model-v1";
 export const CUSTOM_MODELS_KEY = "custom-model-options-v1";
+export const CUSTOM_PROFILES_KEY = "custom-profiles-v1";
 
 export const WRITING_SAMPLE_TYPES = [
   { value: "general", label: "General writing", shortLabel: "General" },

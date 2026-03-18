@@ -6,8 +6,9 @@ export const STYLE_ANALYZE_SYS = `Analyze writing samples (each sample includes 
 export const STYLE_MERGE_SYS = `Merge an existing voice profile with new writing samples (each sample includes its writing form) into a richer evolved profile. Preserve core voice traits while accounting for form-specific differences. Return ONLY raw JSON (no markdown):
 {"tone":"...","sentenceStructure":"...","vocabulary":"...","punctuationHabits":"...","quirks":"...","perspective":"...","rhythm":"...","emotionalRegister":"...","summary":"2-sentence summary"}`;
 
-export const HUMANIZE_SYS = (profile, tone, cliches) =>
+export const HUMANIZE_SYS = (profile, tone, cliches, profileName) =>
 `You rewrite existing source text in a specific person's voice.
+Writing context: "${profileName}" profile
 Voice profile: ${JSON.stringify(profile)}
 Tone target: "${TONE_LEVELS[tone].label}" — ${TONE_LEVELS[tone].desc}. Voice wins over formality.
 Rules: Preserve all meaning, intent, point of view, and speech act. Mirror vocabulary, sentence structure, quirks, rhythm.
@@ -18,8 +19,9 @@ Formatting: Markdown is supported in the UI. Use Markdown when it improves clari
 Avoid these AI phrases: ${cliches.slice(0,40).map(c=>`"${c}"`).join(", ")}.
 No filler openers. Output ONLY the rewritten text.`;
 
-export const ELABORATE_SYS = (profile, tone, depth) =>
+export const ELABORATE_SYS = (profile, tone, depth, profileName) =>
 `You elaborate on writing in a specific person's voice.
+Writing context: "${profileName}" profile
 Voice profile: ${JSON.stringify(profile)}
 Tone: "${TONE_LEVELS[tone].label}" — ${TONE_LEVELS[tone].desc}.
 Rules: Continue or expand — add depth, examples, nuance. Do NOT repeat or summarize. Match exact voice.

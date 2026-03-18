@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import {
   MODEL_OPTIONS, BASE_CLICHES, CLICHE_PROMPT,
   TONE_LEVELS, ELAB_DEPTHS,
-  WRITER_DRAFT_KEY, STYLE_MODAL_DRAFT_KEY, PRIMARY_PROFILE_ID, MODEL_PREF_KEY, CUSTOM_MODELS_KEY,
+  WRITER_DRAFT_KEY, STYLE_MODAL_DRAFT_KEY, PRIMARY_PROFILE_ID, MODEL_PREF_KEY, CUSTOM_MODELS_KEY, CUSTOM_PROFILES_KEY,
   WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, PROFILE_OPTIONS, DEFAULT_SLOTS,
   OUTPUT_PRESET_OPTIONS, APP_THEME_OPTIONS,
 } from './constants/index.js';
@@ -69,9 +69,9 @@ import ManagementPanel from './components/ManagementPanel.jsx';
 import ProcessLogPanel from './components/ProcessLogPanel.jsx';
 import MergeProgressModal from './components/MergeProgressModal.jsx';
 import OutputHistoryDrawer from './components/OutputHistoryDrawer.jsx';
-import { Drawer } from "@mantine/core";
+import { Drawer, Modal } from "@mantine/core";
 import { useReducedMotion } from "@mantine/hooks";
-import { Button } from "./components/AppUI.jsx";
+import { Button, Input } from "./components/AppUI.jsx";
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
@@ -105,6 +105,9 @@ export default function App() {
   // Core
   const [styles, setStyles]                     = useState({});
   const [activeProfileId, setActiveProfileId]   = useState(PROFILE_OPTIONS[0].id);
+  const [customProfiles, setCustomProfiles]     = useState([]);
+  const [addProfileModalOpen, setAddProfileModalOpen] = useState(false);
+  const [newProfileName, setNewProfileName]     = useState("");
   const [cliches, setCliches]                   = useState(BASE_CLICHES);
   const [clichesUpdatedAt, setClichesUpdatedAt] = useState(null);
   const [clicheFetching, setClicheFetching]     = useState(false);
@@ -392,6 +395,8 @@ export default function App() {
         }).catch(() => {});
 
         const storedStyles  = await load("styles-v3");
+        const storedCustomProfiles = await load(CUSTOM_PROFILES_KEY);
+        if (Array.isArray(storedCustomProfiles)) setCustomProfiles(storedCustomProfiles);
         const storedCliches = await load("cliches-v3");
         const storedTs      = await load("cliches-ts-v3");
         const storedWriterDraft = await load(WRITER_DRAFT_KEY);
@@ -549,6 +554,7 @@ export default function App() {
     if (!backupSyncReadyRef.current) return;
     saveStylesBackupWithRetry(styles);
   }, [styles]);
+  useEffect(() => { save(CUSTOM_PROFILES_KEY, customProfiles); }, [customProfiles]);
   useEffect(() => { save(RUNTIME_API_CONFIG_KEY, runtimeConfig); }, [runtimeConfig]);
 
   useEffect(() => {
@@ -646,8 +652,7 @@ export default function App() {
   async function resetActiveProfile() {
     const existingRecord = styles[activeProfileId];
     const existing = hasTrainedProfile(existingRecord) ? existingRecord : null;
-    const selectedProfile = PROFILE_OPTIONS.find((profile) => profile.id === activeProfileId);
-    const profileName = selectedProfile?.label || "Selected";
+    const profileName = resolveProfileName(activeProfileId);
     if (!existing) {
       setError("No saved profile to reset.");
       return;
@@ -712,6 +717,70 @@ export default function App() {
       profileName,
       sampleCount,
     }).catch(() => {});
+  }
+
+  function resolveProfileName(profileId) {
+    return (
+      PROFILE_OPTIONS.find((p) => p.id === profileId)?.label ||
+      customProfiles.find((p) => p.id === profileId)?.label ||
+      styles[profileId]?.name ||
+      "Selected"
+    );
+  }
+
+  function handleAddProfile() {
+    setNewProfileName("");
+    setAddProfileModalOpen(true);
+  }
+
+  function confirmAddProfile() {
+    const name = newProfileName.trim();
+    if (!name) return;
+    // Slug-based ID with collision avoidance
+    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "custom";
+    const existingIds = new Set([
+      ...PROFILE_OPTIONS.map((p) => p.id),
+      ...customProfiles.map((p) => p.id),
+    ]);
+    let id = base;
+    let n = 2;
+    while (existingIds.has(id)) { id = `${base}-${n++}`; }
+    setCustomProfiles((prev) => [...prev, { id, label: name }]);
+    setActiveProfileId(id);
+    setAddProfileModalOpen(false);
+    setNewProfileName("");
+    setStyleModalOpen(true);
+  }
+
+  async function handleDeleteCustomProfile() {
+    const profileName = resolveProfileName(activeProfileId);
+    const confirmed = window.confirm(`Delete the "${profileName}" profile? This cannot be undone.`);
+    if (!confirmed) return;
+
+    const nextCustomProfiles = customProfiles.filter((p) => p.id !== activeProfileId);
+    const nextStyles = { ...styles };
+    delete nextStyles[activeProfileId];
+
+    const nextHistoryState = deleteHistoryEntriesForProfile(historyStateRef.current, activeProfileId);
+    historyStateRef.current = nextHistoryState;
+    setHistoryState(nextHistoryState);
+    await saveOutputHistory(nextHistoryState);
+
+    setCustomProfiles(nextCustomProfiles);
+    setStyles(nextStyles);
+    await save("styles-v3", nextStyles);
+    await saveStylesBackupWithRetry(nextStyles);
+
+    const fallbackId = nextCustomProfiles[0]?.id || PROFILE_OPTIONS[0].id;
+    setActiveProfileId(fallbackId);
+    activeSessionIdRef.current = null;
+    setActiveSessionId(null);
+    setActiveHistoryEntryId(null);
+    setSelectedHistoryPreviewEntryId(null);
+    setSelectedGlobalHistoryEntryId(null);
+    clearOutputState();
+    setStatus(`"${profileName}" profile deleted.`);
+    setTimeout(() => setStatus(""), 1500);
   }
 
   async function saveApiKey() {
@@ -864,8 +933,7 @@ export default function App() {
     if (!filled.length) { setError("Add writing samples (50+ chars each)."); return false; }
 
     const existing = styles[activeProfileId];
-    const selectedProfile = PROFILE_OPTIONS.find((profile) => profile.id === activeProfileId);
-    const profileName = selectedProfile?.label || "Custom";
+    const profileName = resolveProfileName(activeProfileId);
     setError("");
     setMergeProgressTitle(existing ? `Merging ${profileName} profile` : `Analyzing ${profileName} profile`);
     clearMergeProgress();
@@ -1120,7 +1188,7 @@ export default function App() {
       const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
       pushProcessStep(filterMsg, "info", filterDetail);
       const basePrompt = applyPromptDecorators(
-        HUMANIZE_SYS(filteredProfile, toneLevel, stripCliches ? cliches : BASE_CLICHES.slice(0,10))
+        HUMANIZE_SYS(filteredProfile, toneLevel, stripCliches ? cliches : BASE_CLICHES.slice(0,10), activeProfile.name)
       );
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
@@ -1208,7 +1276,7 @@ export default function App() {
       startOutputStream();
       pushProcessStep("Preparing prompt and opening model stream.");
       let loggedFirstChunk = false;
-      const basePrompt = applyPromptDecorators(ELABORATE_SYS(filteredProfile, toneLevel, elabDepth));
+      const basePrompt = applyPromptDecorators(ELABORATE_SYS(filteredProfile, toneLevel, elabDepth, activeProfile.name));
       const sessionContextBlock = buildSessionContextBlock(sessionIdOverride);
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
@@ -1360,6 +1428,8 @@ export default function App() {
       <Topbar
         activeProfileId={activeProfileId}
         onProfileChange={setActiveProfileId}
+        customProfiles={customProfiles}
+        onAddProfile={handleAddProfile}
         hasProfile={hasProfile}
         activeProfile={activeProfile}
         backupStatus={backupStatus}
@@ -1578,13 +1648,43 @@ export default function App() {
           onRefreshCliches={refreshCliches}
           clicheFetching={clicheFetching}
           hasProfile={hasProfile}
+          isCustomProfile={customProfiles.some((p) => p.id === activeProfileId)}
           onExportProfile={exportProfile}
           onImportProfile={importProfile}
           onOpenApiKey={() => setApiKeyModalOpen(true)}
           onResetProfile={resetActiveProfile}
+          onDeleteProfile={handleDeleteCustomProfile}
           onFullAppReset={fullAppDataReset}
         />
       </Drawer>
+
+      <Modal
+        opened={addProfileModalOpen}
+        onClose={() => setAddProfileModalOpen(false)}
+        centered
+        size="sm"
+        withCloseButton={false}
+        classNames={{ content: "modal-content", body: "panel-grid" }}
+      >
+        <div className="toolbar-row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+          <h2 style={{ margin: 0 }}>New profile</h2>
+          <Button variant="light" size="sm" onPress={() => setAddProfileModalOpen(false)} aria-label="Close" iconOnly>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </Button>
+        </div>
+        <Input
+          placeholder="e.g. Freelance pitches"
+          value={newProfileName}
+          onChange={(e) => setNewProfileName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") confirmAddProfile(); }}
+          autoFocus
+          style={{ marginBottom: 12 }}
+        />
+        <div className="toolbar-row" style={{ justifyContent: "flex-end", gap: 8 }}>
+          <Button variant="bordered" size="sm" onPress={() => setAddProfileModalOpen(false)}>Cancel</Button>
+          <Button color="primary" variant="solid" size="sm" onPress={confirmAddProfile} isDisabled={!newProfileName.trim()}>Create</Button>
+        </div>
+      </Modal>
 
       {styleModalOpen && (
         <StyleModal

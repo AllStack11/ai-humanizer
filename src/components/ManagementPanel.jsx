@@ -12,10 +12,12 @@ export default function ManagementPanel({
   onRefreshCliches,
   clicheFetching,
   hasProfile,
+  isCustomProfile,
   onExportProfile,
   onImportProfile,
   onOpenApiKey,
   onResetProfile,
+  onDeleteProfile,
   onFullAppReset,
 }) {
   const importInputRef = useRef(null);
@@ -90,6 +92,14 @@ export default function ManagementPanel({
                   <path d="M3 6h18" />
                   <path d="M8 6V4h8v2" />
                   <path d="m19 6-1 14H6L5 6" />
+                </svg>
+              </Button>
+            ) : null}
+            {isCustomProfile ? (
+              <Button color="danger" variant="solid" onPress={onDeleteProfile} aria-label="Delete profile" tooltip="Permanently delete this custom profile" iconOnly>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
                 </svg>
               </Button>
             ) : null}
