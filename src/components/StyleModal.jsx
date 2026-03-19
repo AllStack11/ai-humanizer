@@ -3,7 +3,7 @@ import { Modal, NativeSelect } from "@mantine/core";
 import { Button, Card, TextArea } from "./AppUI.jsx";
 import { load, save } from "../lib/storage.js";
 import { normalizeSampleSlot, getFilledSlots, resolveSampleType } from "../utils/profile.js";
-import { WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, DEFAULT_SLOTS, STYLE_MODAL_DRAFT_KEY } from "../constants/index.js";
+import { WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, DEFAULT_SLOTS, STYLE_MODAL_DRAFT_KEY, PROFILE_GOAL_OPTIONS, PROFILE_DOMAIN_OPTIONS } from "../constants/index.js";
 
 function ModalIcon({ children }) {
   return (
@@ -16,8 +16,8 @@ function ModalIcon({ children }) {
   );
 }
 
-export default function StyleModal({ hasProfile, loading, health, profileLabel, sampleCount = 0, sampleEntries = [], profile = null, onTrainProfile, onClose }) {
-  const initialSlots = DEFAULT_SLOTS.slice(0, 1).map((slot, index) => normalizeSampleSlot(slot, index + 1));
+export default function StyleModal({ profileId, hasProfile, loading, health, profileLabel, sampleCount = 0, sampleEntries = [], profile = null, meta = null, onTrainProfile, onUpdateMeta, onClose }) {
+  const initialSlots = [];
   const [trainSlots, setTrainSlots] = useState(initialSlots);
   const [poolInput, setPoolInput] = useState("");
   const [poolType, setPoolType] = useState(DEFAULT_SAMPLE_TYPE);
@@ -67,7 +67,7 @@ export default function StyleModal({ hasProfile, loading, health, profileLabel, 
         setPoolType(DEFAULT_SAMPLE_TYPE);
         return;
       }
-      const draft = await load(STYLE_MODAL_DRAFT_KEY);
+      const draft = await load(`${STYLE_MODAL_DRAFT_KEY}:${profileId}`);
       if (!draft || typeof draft !== "object") {
         if (sampleEntries.length) {
           setTrainSlots(sampleEntries.map((slot, index) => normalizeSampleSlot(slot, index + 1)));
@@ -90,23 +90,23 @@ export default function StyleModal({ hasProfile, loading, health, profileLabel, 
   }, [hasProfile]);
 
   useEffect(() => {
-    save(STYLE_MODAL_DRAFT_KEY, {
+    if (!profileId) return;
+    save(`${STYLE_MODAL_DRAFT_KEY}:${profileId}`, {
       trainSlots,
       poolInput,
       poolType,
       updatedAt: new Date().toISOString(),
     });
-  }, [trainSlots, poolInput, poolType]);
+  }, [trainSlots, poolInput, poolType, profileId]);
 
   function resetDraft() {
     setTrainSlots(initialSlots);
     setPoolInput("");
     setPoolType(DEFAULT_SAMPLE_TYPE);
-    save(STYLE_MODAL_DRAFT_KEY, null);
+    save(`${STYLE_MODAL_DRAFT_KEY}:${profileId}`, null);
   }
 
   function removeSlot(id) {
-    if (trainSlots.length <= 1) return;
     setTrainSlots((prev) => prev.filter((slot) => slot.id !== id));
   }
 
@@ -167,59 +167,6 @@ export default function StyleModal({ hasProfile, loading, health, profileLabel, 
           Build a style pool by dropping or pasting your writing. Every piece stays editable and can be refined over time.
         </p>
 
-        {health ? (
-          <Card className="app-card style-health-card" radius="lg">
-            <Card.Content className="toolbar-row style-health-strip p-3">
-              <span className="style-health-chip text-mono">
-                {`${sampleCount} samples • ${profileLabel || "Selected"} profile${hasProfile ? "" : " needs onboarding"}`}
-              </span>
-              <span className="text-mono style-health-kicker">Profile health</span>
-              <span className="style-health-score">{health.score}/100</span>
-              <span className="text-mono style-health-meta">
-                coverage {health.typeCoverage}/{WRITING_SAMPLE_TYPES.length}
-              </span>
-              <span className="text-mono style-health-meta">
-                {health.sampleCount || 0} sample{health.sampleCount === 1 ? "" : "s"}
-              </span>
-            </Card.Content>
-          </Card>
-        ) : null}
-
-        {hasProfile && profile ? (
-          <details className="debug-log" style={{ borderRadius: 16, overflow: "hidden" }}>
-            <summary className="diagnostic-log-summary" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", cursor: "pointer", listStyle: "none", background: "rgba(255,255,255,0.6)", borderRadius: 16 }}>
-              <span className="text-mono" style={{ fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase" }}>Profile Analysis</span>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.5 }}>
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </summary>
-            <div className="panel-grid p-3" style={{ paddingTop: 10 }}>
-              {profile.summary && (
-                <div className="debug-block">
-                  <p className="panel-title" style={{ marginBottom: 4 }}>Summary</p>
-                  <p className="debug-block-content" style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>{profile.summary}</p>
-                </div>
-              )}
-              <div className="diagnostic-log-detail-grid">
-                {[
-                  ["Tone", profile.tone],
-                  ["Emotional Register", profile.emotionalRegister],
-                  ["Vocabulary", profile.vocabulary],
-                  ["Perspective", profile.perspective],
-                  ["Sentence Structure", profile.sentenceStructure],
-                  ["Rhythm", profile.rhythm],
-                  ["Punctuation Habits", profile.punctuationHabits],
-                  ["Quirks", profile.quirks],
-                ].filter(([, val]) => val).map(([label, val]) => (
-                  <div key={label} className="debug-block">
-                    <p className="panel-title" style={{ marginBottom: 4 }}>{label}</p>
-                    <p className="debug-block-content" style={{ margin: 0 }}>{val}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </details>
-        ) : null}
 
         <Card className="app-card" radius="lg">
           <Card.Content
@@ -286,7 +233,7 @@ export default function StyleModal({ hasProfile, loading, health, profileLabel, 
                       variant="bordered"
                       size="sm"
                       onPress={() => removeSlot(slot.id)}
-                      isDisabled={trainSlots.length <= 1}
+                      isDisabled={false}
                       aria-label={`Remove style piece ${slot.id}`}
                       tooltip={`Remove style piece ${slot.id}`}
                       iconOnly
@@ -329,6 +276,78 @@ export default function StyleModal({ hasProfile, loading, health, profileLabel, 
             </Card>
           ))}
         </div>
+
+        {onUpdateMeta && (
+          <div style={{ marginTop: 20 }}>
+            <h3 className="text-mono" style={{ margin: "0 0 8px", fontSize: 12 }}>Profile Context</h3>
+            <Card className="app-card" radius="lg">
+              <Card.Content className="panel-grid p-3">
+                <div>
+                  <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Writing Goals</label>
+                  <div className="toolbar-row" style={{ flexWrap: "wrap", gap: 6 }}>
+                    {PROFILE_GOAL_OPTIONS.map(({ value, label }) => {
+                      const active = meta?.goals?.includes(value);
+                      return (
+                        <button
+                          key={value}
+                          className={`profile-meta-chip${active ? " profile-meta-chip--active" : ""}`}
+                          onClick={() => {
+                            const current = meta?.goals || [];
+                            onUpdateMeta({ goals: active ? current.filter(g => g !== value) : [...current, value] });
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Content Domains</label>
+                  <div className="toolbar-row" style={{ flexWrap: "wrap", gap: 6 }}>
+                    {PROFILE_DOMAIN_OPTIONS.map(({ value, label }) => {
+                      const active = meta?.domains?.includes(value);
+                      return (
+                        <button
+                          key={value}
+                          className={`profile-meta-chip${active ? " profile-meta-chip--active" : ""}`}
+                          onClick={() => {
+                            const current = meta?.domains || [];
+                            onUpdateMeta({ domains: active ? current.filter(d => d !== value) : [...current, value] });
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Target Audience</label>
+                  <input
+                    className="app-input"
+                    type="text"
+                    defaultValue={meta?.audience || ""}
+                    placeholder="e.g. tech professionals, general public"
+                    onBlur={(e) => onUpdateMeta({ audience: e.target.value })}
+                    style={{ width: "100%", boxSizing: "border-box" }}
+                  />
+                </div>
+                <div>
+                  <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Notes</label>
+                  <textarea
+                    className="app-input"
+                    defaultValue={meta?.notes || ""}
+                    placeholder="Personal notes about this profile (not sent to AI)"
+                    rows={2}
+                    onBlur={(e) => onUpdateMeta({ notes: e.target.value })}
+                    style={{ width: "100%", boxSizing: "border-box", resize: "vertical" }}
+                  />
+                </div>
+              </Card.Content>
+            </Card>
+          </div>
+        )}
 
         <div className="toolbar-row" style={{ justifyContent: "space-between", marginTop: 14 }}>
           <span className="text-mono" style={{ fontSize: 11 }}>

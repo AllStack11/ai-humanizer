@@ -25,3 +25,26 @@ export const DEFAULT_SLOTS = [
   { id: 1, text: "", type: DEFAULT_SAMPLE_TYPE },
   { id: 2, text: "", type: DEFAULT_SAMPLE_TYPE },
 ];
+
+export const PROFILE_GOAL_OPTIONS = [
+  { value: "inform",    label: "Inform" },
+  { value: "persuade",  label: "Persuade" },
+  { value: "entertain", label: "Entertain" },
+  { value: "connect",   label: "Connect" },
+  { value: "inspire",   label: "Inspire" },
+];
+
+export const PROFILE_DOMAIN_OPTIONS = [
+  { value: "technology", label: "Technology" },
+  { value: "personal",   label: "Personal" },
+  { value: "business",   label: "Business" },
+  { value: "creative",   label: "Creative" },
+  { value: "academic",   label: "Academic" },
+];
+
+export const DEFAULT_PROFILE_META = {
+  goals:    [],
+  audience: "",
+  domains:  [],
+  notes:    "",
+};

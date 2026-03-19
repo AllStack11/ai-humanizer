@@ -1,4 +1,4 @@
-import { WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, PROFILE_OPTIONS, PRIMARY_PROFILE_ID } from '../constants/index.js';
+import { WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, PROFILE_OPTIONS, PRIMARY_PROFILE_ID, DEFAULT_PROFILE_META } from '../constants/index.js';
 
 function normalizeSampleTypeKey(rawValue = "") {
   return String(rawValue)
@@ -67,10 +67,51 @@ export function normalizeStoredStyles(rawStyles) {
       sampleEntries,
       samples: sampleEntries.map(sample => sample.text),
       sampleCount: sampleEntries.length,
+      meta: normalizeProfileMeta(style.meta),
     };
   }
   if (!Object.keys(normalized).length) return normalized;
   return normalized;
+}
+
+export function normalizeProfileMeta(rawMeta) {
+  return {
+    goals:    Array.isArray(rawMeta?.goals)          ? rawMeta.goals    : DEFAULT_PROFILE_META.goals,
+    audience: typeof rawMeta?.audience === "string"  ? rawMeta.audience : DEFAULT_PROFILE_META.audience,
+    domains:  Array.isArray(rawMeta?.domains)        ? rawMeta.domains  : DEFAULT_PROFILE_META.domains,
+    notes:    typeof rawMeta?.notes === "string"     ? rawMeta.notes    : DEFAULT_PROFILE_META.notes,
+  };
+}
+
+const HIGH_EVIDENCE_TRAITS = new Set(["quirks", "humor", "transitionStyle"]);
+
+const ALL_TRAIT_KEYS = [
+  "tone", "sentenceStructure", "vocabulary", "punctuationHabits",
+  "quirks", "perspective", "rhythm", "emotionalRegister",
+  "formality", "humor", "transitionStyle",
+];
+
+export function computeTraitConfidence(profileRecord) {
+  const sampleEntries = Array.isArray(profileRecord?.sampleEntries) ? profileRecord.sampleEntries : [];
+  const sampleCount = sampleEntries.length;
+  const typeDiversity = new Set(sampleEntries.map(e => e.type).filter(Boolean)).size;
+
+  const confidence = {};
+  for (const key of ALL_TRAIT_KEYS) {
+    const hasValue = !!profileRecord?.profile?.[key];
+    if (!hasValue) { confidence[key] = "low"; continue; }
+    const needsHighEvidence = HIGH_EVIDENCE_TRAITS.has(key);
+    const sampleThreshold = needsHighEvidence ? 4 : 3;
+    const typeThreshold   = needsHighEvidence ? 3 : 2;
+    if (sampleCount >= sampleThreshold && typeDiversity >= typeThreshold) {
+      confidence[key] = "high";
+    } else if (sampleCount >= 1) {
+      confidence[key] = "medium";
+    } else {
+      confidence[key] = "low";
+    }
+  }
+  return confidence;
 }
 
 export function collectCoverageGaps(sampleEntries = []) {

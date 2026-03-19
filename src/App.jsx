@@ -54,7 +54,7 @@ import {
   computeWordCharDelta,
   buildClicheRanges,
   normalizeSampleSlot, normalizeStoredStyles, getFilledSlots, formatSampleForPrompt,
-  collectCoverageGaps, computeProfileHealth, hasTrainedProfile,
+  collectCoverageGaps, computeProfileHealth, hasTrainedProfile, normalizeProfileMeta, computeTraitConfidence,
   getFormatPresetInstruction, formatRelativeTime,
 } from './utils/index.js';
 
@@ -64,10 +64,13 @@ import WriterPanel from './components/WriterPanel.jsx';
 import OutputPanel from './components/OutputPanel.jsx';
 import DiagnosticsPanel from './components/DiagnosticsPanel.jsx';
 import StyleModal from './components/StyleModal.jsx';
+import WritingProfileModal from './components/WritingProfileModal.jsx';
 import ApiKeyModal from './components/ApiKeyModal.jsx';
 import ManagementPanel from './components/ManagementPanel.jsx';
 import ProcessLogPanel from './components/ProcessLogPanel.jsx';
 import MergeProgressModal from './components/MergeProgressModal.jsx';
+import AddModelModal from './components/AddModelModal.jsx';
+import ResetConfirmModal from './components/ResetConfirmModal.jsx';
 import OutputHistoryDrawer from './components/OutputHistoryDrawer.jsx';
 import { Drawer, Modal } from "@mantine/core";
 import { useReducedMotion } from "@mantine/hooks";
@@ -107,6 +110,7 @@ export default function App() {
   const [activeProfileId, setActiveProfileId]   = useState(PROFILE_OPTIONS[0].id);
   const [customProfiles, setCustomProfiles]     = useState([]);
   const [addProfileModalOpen, setAddProfileModalOpen] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [newProfileName, setNewProfileName]     = useState("");
   const [cliches, setCliches]                   = useState(BASE_CLICHES);
   const [clichesUpdatedAt, setClichesUpdatedAt] = useState(null);
@@ -128,6 +132,8 @@ export default function App() {
   const [themeKey, setThemeKey] = useState(APP_THEME_OPTIONS[0].value);
   const [modelOptions, setModelOptions] = useState(MODEL_OPTIONS);
   const [selectedModel, setSelectedModel] = useState(MODEL_OPTIONS[0].value);
+  const [addModelModalOpen, setAddModelModalOpen] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [requestLogs, setRequestLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -394,16 +400,22 @@ export default function App() {
           defaultModel: MODEL_OPTIONS[0].value,
         }).catch(() => {});
 
-        const storedStyles  = await load("styles-v3");
-        const storedCustomProfiles = await load(CUSTOM_PROFILES_KEY);
+        const [
+          storedStyles, storedCustomProfiles, storedCliches, storedTs,
+          storedWriterDraft, storedOutputHistory, storedRuntimeConfig,
+          storedModel, storedCustomModels,
+        ] = await Promise.all([
+          load("styles-v3"),
+          load(CUSTOM_PROFILES_KEY),
+          load("cliches-v3"),
+          load("cliches-ts-v3"),
+          load(`${WRITER_DRAFT_KEY}:${PROFILE_OPTIONS[0].id}`),
+          loadOutputHistory(),
+          load(RUNTIME_API_CONFIG_KEY),
+          load(MODEL_PREF_KEY),
+          load(CUSTOM_MODELS_KEY),
+        ]);
         if (Array.isArray(storedCustomProfiles)) setCustomProfiles(storedCustomProfiles);
-        const storedCliches = await load("cliches-v3");
-        const storedTs      = await load("cliches-ts-v3");
-        const storedWriterDraft = await load(WRITER_DRAFT_KEY);
-        const storedOutputHistory = await loadOutputHistory();
-        const storedRuntimeConfig = await load(RUNTIME_API_CONFIG_KEY);
-        const storedModel = await load(MODEL_PREF_KEY);
-        const storedCustomModels = await load(CUSTOM_MODELS_KEY);
         const resolvedRuntimeConfig = {
           apiUrl: typeof storedRuntimeConfig?.apiUrl === "string" ? storedRuntimeConfig.apiUrl.trim() : "",
           apiKeyFile: typeof storedRuntimeConfig?.apiKeyFile === "string" ? storedRuntimeConfig.apiKeyFile.trim() : "",
@@ -567,7 +579,13 @@ export default function App() {
     const customOnly = modelOptions.filter((entry) => !MODEL_OPTIONS.some((base) => base.value === entry.value));
     save(CUSTOM_MODELS_KEY, customOnly);
   }, [modelOptions]);
-  useEffect(() => { save(WRITER_DRAFT_KEY, inputText); }, [inputText]);
+  useEffect(() => { save(`${WRITER_DRAFT_KEY}:${activeProfileId}`, inputText); }, [inputText]);
+  useEffect(() => {
+    if (!backupSyncReadyRef.current) return;
+    load(`${WRITER_DRAFT_KEY}:${activeProfileId}`).then(draft => {
+      setInputText(typeof draft === "string" ? draft : "");
+    });
+  }, [activeProfileId]);
   useEffect(() => {
     if (outputPhase !== "ready" || !activeHistoryEntryId) return;
     const entry = historyStateRef.current.entriesById[activeHistoryEntryId];
@@ -581,24 +599,28 @@ export default function App() {
   }, [outputText, outputPhase, activeHistoryEntryId]);
 
   function addCustomModelFromDropdown() {
-    const raw = window.prompt("Enter OpenRouter model id (example: openai/gpt-4o-mini)");
-    const value = raw?.trim();
-    if (!value) return;
+    setAddModelModalOpen(true);
+  }
 
+  function handleRemoveModel(value) {
+    const next = modelOptions.filter((m) => m.value !== value);
+    if (next.length === 0) return; // never remove the last model
+    setModelOptions(next);
+    if (selectedModel === value) setSelectedModel(next[0].value);
+  }
+
+  function handleAddModel({ value, label }) {
     if (modelOptions.some((entry) => entry.value === value)) {
       setSelectedModel(value);
       setStatus("Model already exists. Switched to it.");
       setTimeout(() => setStatus(""), 1200);
-      return;
+    } else {
+      setModelOptions((prev) => [...prev, { value, label }]);
+      setSelectedModel(value);
+      setStatus("Custom model added.");
+      setTimeout(() => setStatus(""), 1200);
     }
-
-    const labelRaw = window.prompt("Optional display name for this model", value);
-    const label = labelRaw?.trim() || value;
-    const next = [...modelOptions, { value, label }];
-    setModelOptions(next);
-    setSelectedModel(value);
-    setStatus("Custom model added.");
-    setTimeout(() => setStatus(""), 1200);
+    setAddModelModalOpen(false);
   }
 
   useEffect(() => {
@@ -678,7 +700,7 @@ export default function App() {
       return;
     }
 
-    save(STYLE_MODAL_DRAFT_KEY, null);
+    save(`${STYLE_MODAL_DRAFT_KEY}:${activeProfileId}`, null);
 
     const nextStyles = {
       ...styles,
@@ -693,7 +715,7 @@ export default function App() {
       },
     };
 
-    await save(STYLE_MODAL_DRAFT_KEY, null);
+    await save(`${STYLE_MODAL_DRAFT_KEY}:${activeProfileId}`, null);
     setStyles(nextStyles);
     await save("styles-v3", nextStyles);
     await saveStylesBackupWithRetry(nextStyles);
@@ -726,6 +748,21 @@ export default function App() {
       styles[profileId]?.name ||
       "Selected"
     );
+  }
+
+  function handleUpdateProfileMeta(profileId, metaUpdate) {
+    setStyles(prev => {
+      const existing = prev[profileId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        [profileId]: {
+          ...existing,
+          meta: { ...normalizeProfileMeta(existing.meta), ...metaUpdate },
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    });
   }
 
   function handleAddProfile() {
@@ -766,6 +803,7 @@ export default function App() {
     setHistoryState(nextHistoryState);
     await saveOutputHistory(nextHistoryState);
 
+    save(`${WRITER_DRAFT_KEY}:${activeProfileId}`, null);
     setCustomProfiles(nextCustomProfiles);
     setStyles(nextStyles);
     await save("styles-v3", nextStyles);
@@ -832,23 +870,10 @@ export default function App() {
   }
 
   async function fullAppDataReset() {
-    const confirmStep1 = window.confirm("Reset all app data? This erases profiles, backups, logs, settings, drafts, and API key.");
-    if (!confirmStep1) return;
-    const confirmStep2 = window.confirm("Are you absolutely sure? This action cannot be undone.");
-    if (!confirmStep2) return;
-
-    const typed = window.prompt('Type "RESET APP DATA" to confirm.', "");
-    if ((typed || "").trim().toUpperCase() !== "RESET APP DATA") {
-      setStatus("Full reset cancelled.");
-      setTimeout(() => setStatus(""), 1400);
-      return;
-    }
-
     setLoading(true);
     setError("");
     try {
       await resetAppData(runtimeConfig);
-      await save(STYLE_MODAL_DRAFT_KEY, null);
 
       setStyles({});
       setActiveProfileId(PROFILE_OPTIONS[0].id);
@@ -1029,6 +1054,7 @@ export default function App() {
             sampleCount: sampleEntries.length,
             createdAt,
             updatedAt: new Date().toISOString(),
+            meta: normalizeProfileMeta(existingProfile?.meta),
           }
         };
       });
@@ -1184,11 +1210,12 @@ export default function App() {
     try {
       pushProcessStep("Validating profile and source text.");
       if (!(await ensureApiKeyReady("rewriting text"))) return;
-      const filteredProfile = filterProfileForContext(activeProfile.profile, { toneLevel, formatPreset, mode });
+      const confidence = computeTraitConfidence(activeProfile);
+      const filteredProfile = filterProfileForContext(activeProfile.profile, { toneLevel, formatPreset, mode, confidence });
       const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
       pushProcessStep(filterMsg, "info", filterDetail);
       const basePrompt = applyPromptDecorators(
-        HUMANIZE_SYS(filteredProfile, toneLevel, stripCliches ? cliches : BASE_CLICHES.slice(0,10), activeProfile.name)
+        HUMANIZE_SYS(filteredProfile, toneLevel, stripCliches ? cliches : BASE_CLICHES.slice(0,10), activeProfile.name, activeProfile.meta)
       );
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
@@ -1270,13 +1297,14 @@ export default function App() {
     try {
       pushProcessStep("Validating profile and source text.");
       if (!(await ensureApiKeyReady("expanding text"))) return;
-      const filteredProfile = filterProfileForContext(activeProfile.profile, { toneLevel, formatPreset, mode });
+      const confidence = computeTraitConfidence(activeProfile);
+      const filteredProfile = filterProfileForContext(activeProfile.profile, { toneLevel, formatPreset, mode, confidence });
       const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
       pushProcessStep(filterMsg, "info", filterDetail);
       startOutputStream();
       pushProcessStep("Preparing prompt and opening model stream.");
       let loggedFirstChunk = false;
-      const basePrompt = applyPromptDecorators(ELABORATE_SYS(filteredProfile, toneLevel, elabDepth, activeProfile.name));
+      const basePrompt = applyPromptDecorators(ELABORATE_SYS(filteredProfile, toneLevel, elabDepth, activeProfile.name, activeProfile.meta));
       const sessionContextBlock = buildSessionContextBlock(sessionIdOverride);
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
@@ -1365,6 +1393,7 @@ export default function App() {
   const activeProfile = styles[activeProfileId] || null;
   const hasProfile = hasTrainedProfile(activeProfile);
   const health = computeProfileHealth(activeProfile);
+  const activeProfileConfidence = useMemo(() => computeTraitConfidence(activeProfile), [activeProfile]);
   const words = countWords(inputText);
 
   const handleInputChange = (val) => {
@@ -1438,6 +1467,7 @@ export default function App() {
         onRetryBackup={() => saveStylesBackupWithRetry(styles)}
         onOpenStyleModal={() => setStyleModalOpen(true)}
         onOpenManagement={() => setManagementOpen(true)}
+        onOpenProfileModal={() => setProfileModalOpen(true)}
       />
 
       {(error || (status && !loading)) && (
@@ -1446,7 +1476,7 @@ export default function App() {
             <div className="toast toast-error app-popup-notification" role="alert">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
               <span style={{ flex: 1 }}>{error}</span>
-              <button onClick={() => setError("")} style={{ border: 0, background: "transparent", cursor: "pointer", color: "inherit" }}>
+              <button onClick={() => setError("")} style={{ border: 0, background: "transparent", cursor: "pointer", color: "inherit", lineHeight: 0 }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
@@ -1454,7 +1484,10 @@ export default function App() {
           {status && !loading && (
             <div className="toast toast-success app-popup-notification" role="status">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-              {status}
+              <span style={{ flex: 1 }}>{status}</span>
+              <button onClick={() => setStatus("")} style={{ border: 0, background: "transparent", cursor: "pointer", color: "inherit", lineHeight: 0 }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
             </div>
           )}
         </div>
@@ -1490,6 +1523,7 @@ export default function App() {
                 onModelChange={setSelectedModel}
                 modelOptions={modelOptions}
                 onAddModel={addCustomModelFromDropdown}
+                onRemoveModel={handleRemoveModel}
                 onNewChat={handleNewChat}
                 onSubmit={mode === "humanize" ? humanize : elaborate}
               />
@@ -1654,7 +1688,7 @@ export default function App() {
           onOpenApiKey={() => setApiKeyModalOpen(true)}
           onResetProfile={resetActiveProfile}
           onDeleteProfile={handleDeleteCustomProfile}
-          onFullAppReset={fullAppDataReset}
+          onFullAppReset={() => setResetConfirmOpen(true)}
         />
       </Drawer>
 
@@ -1688,6 +1722,7 @@ export default function App() {
 
       {styleModalOpen && (
         <StyleModal
+          profileId={activeProfileId}
           hasProfile={hasProfile}
           loading={profileMergeLoading}
           health={health}
@@ -1695,8 +1730,21 @@ export default function App() {
           sampleCount={activeProfile?.sampleEntries?.length || activeProfile?.sampleCount || 0}
           sampleEntries={activeProfile?.sampleEntries || []}
           profile={activeProfile?.profile || null}
+          meta={activeProfile?.meta || null}
           onTrainProfile={trainProfile}
+          onUpdateMeta={(metaUpdate) => handleUpdateProfileMeta(activeProfileId, metaUpdate)}
           onClose={() => setStyleModalOpen(false)}
+        />
+      )}
+
+      {profileModalOpen && (
+        <WritingProfileModal
+          profile={activeProfile?.profile || null}
+          health={health}
+          profileLabel={resolveProfileName(activeProfileId)}
+          hasProfile={hasProfile}
+          confidence={activeProfileConfidence}
+          onClose={() => setProfileModalOpen(false)}
         />
       )}
 
@@ -1713,6 +1761,22 @@ export default function App() {
           clearMergeProgress();
         }}
       />
+
+      {addModelModalOpen && (
+        <AddModelModal
+          opened
+          onClose={() => setAddModelModalOpen(false)}
+          onAdd={handleAddModel}
+          apiKey={apiKeyInput}
+        />
+      )}
+
+      {resetConfirmOpen && (
+        <ResetConfirmModal
+          onClose={() => setResetConfirmOpen(false)}
+          onConfirm={() => { setResetConfirmOpen(false); fullAppDataReset(); }}
+        />
+      )}
 
       {apiKeyModalOpen && isTauriRuntime() && (
         <ApiKeyModal

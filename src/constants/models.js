@@ -1,5 +1,5 @@
 export const MODEL_OPTIONS = [
-  { value: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4" },
+  { value: "anthropic/claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { value: "aion-labs/aion-2.0", label: "Aion 2.0" },
   { value: "minimax/minimax-m2.5", label: "Minimax M2.5" },
   { value: "moonshotai/kimi-k2.5", label: "Kimi K2.5" },

@@ -29,6 +29,21 @@ const PROFILE_FILTER_RULES = [
     when: ({ formatPreset }) => formatPreset === "email",
     suppress: ["quirks"],
   },
+  {
+    // Low-confidence quirks: not enough sample evidence to trust this trait
+    when: ({ confidence }) => confidence?.quirks === "low",
+    suppress: ["quirks"],
+  },
+  {
+    // Low-confidence humor: insufficient samples to reliably detect comedic voice
+    when: ({ confidence }) => confidence?.humor === "low",
+    suppress: ["humor"],
+  },
+  {
+    // Low-confidence transitionStyle: not enough varied samples to detect linking patterns
+    when: ({ confidence }) => confidence?.transitionStyle === "low",
+    suppress: ["transitionStyle"],
+  },
 ];
 
 export function filterProfileForContext(profile, context) {

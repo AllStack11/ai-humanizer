@@ -16,6 +16,7 @@ export default function Topbar({
   onRetryBackup,
   onOpenStyleModal,
   onOpenManagement,
+  onOpenProfileModal,
 }) {
   const backupTone = backupStatus === "error" ? "error" : backupStatus === "ok" ? "ok" : "live";
   const backupLabel =
@@ -67,6 +68,20 @@ export default function Topbar({
                   className="app-select-wrap"
                   styles={{ input: { minWidth: 220 } }}
                 />
+
+                <Button
+                  size="sm"
+                  variant="bordered"
+                  onPress={onOpenProfileModal}
+                  aria-label="View writing profile"
+                  tooltip="View your writing profile"
+                  iconOnly
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                </Button>
 
                 <Button
                   size="sm"

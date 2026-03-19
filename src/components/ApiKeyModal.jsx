@@ -23,6 +23,7 @@ export default function ApiKeyModal({
       withCloseButton={false}
       closeOnClickOutside={!required}
       classNames={{ content: "modal-content", body: "panel-grid" }}
+      zIndex={500}
     >
         <div className="toolbar-row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
           <h2 style={{ margin: 0 }}>OpenRouter API Key</h2>

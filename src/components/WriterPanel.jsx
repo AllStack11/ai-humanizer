@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NativeSelect } from "@mantine/core";
+import { NativeSelect, Popover } from "@mantine/core";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -16,6 +16,134 @@ const ADD_CUSTOM_MODEL_VALUE = "__add_custom_model__";
 const IS_TEST_ENV =
   typeof import.meta !== "undefined" &&
   Boolean(import.meta.env?.MODE === "test" || import.meta.env?.VITEST);
+
+function ModelSelector({ selectedModel, modelOptions, onModelChange, onAddModel, onRemoveModel }) {
+  const [open, setOpen] = useState(false);
+  const current = modelOptions.find((m) => m.value === selectedModel);
+  const label = current?.label || selectedModel || "Select model";
+
+  return (
+    <Popover
+      opened={open}
+      onChange={setOpen}
+      position="top-start"
+      offset={4}
+      withinPortal
+    >
+      <Popover.Target>
+        <button
+          type="button"
+          className="editor-model-select"
+          onClick={() => setOpen((o) => !o)}
+          aria-label="Select model"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 6,
+            cursor: "pointer",
+            textAlign: "left",
+            background: "transparent",
+            border: 0,
+            boxShadow: "none",
+            padding: "4px 0",
+            minHeight: 34,
+            color: "var(--editor-overlay-text)",
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: "-0.02em",
+          }}
+        >
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.6 }}>
+            <path d="m18 15-6-6-6 6" />
+          </svg>
+        </button>
+      </Popover.Target>
+      <Popover.Dropdown
+        style={{
+          padding: 4,
+          minWidth: 220,
+          maxHeight: 280,
+          overflowY: "auto",
+          borderRadius: 10,
+        }}
+      >
+        {modelOptions.map((m) => (
+          <div
+            key={m.value}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              borderRadius: 7,
+              background: m.value === selectedModel ? "rgba(120,90,50,0.12)" : "transparent",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => { onModelChange(m.value); setOpen(false); }}
+              style={{
+                flex: 1,
+                textAlign: "left",
+                padding: "7px 10px",
+                fontSize: 13,
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {m.label}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onRemoveModel(m.value); }}
+              aria-label={`Remove ${m.label}`}
+              style={{
+                padding: "4px 8px",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                opacity: 0.45,
+                flexShrink: 0,
+                lineHeight: 1,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.45"; }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+              </svg>
+            </button>
+          </div>
+        ))}
+        <div style={{ borderTop: "1px solid rgba(120,100,80,0.15)", marginTop: 3, paddingTop: 3 }}>
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onAddModel(); }}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              padding: "7px 10px",
+              fontSize: 13,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              borderRadius: 7,
+              opacity: 0.75,
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.background = "rgba(120,90,50,0.06)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "0.75"; e.currentTarget.style.background = "transparent"; }}
+          >
+            + Add custom model…
+          </button>
+        </div>
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
 
 function normalizeMarkdown(text) {
   return String(text || "").replace(/\r\n/g, "\n").replace(/\n+$/, "").trim();
@@ -218,6 +346,7 @@ export default function WriterPanel({
   onModelChange,
   modelOptions,
   onAddModel,
+  onRemoveModel,
   onNewChat,
   onSubmit,
 }) {
@@ -456,21 +585,12 @@ export default function WriterPanel({
                   </div>
 
                   <div className="toolbar-row editor-send-cluster">
-                    <NativeSelect
-                      value={selectedModel}
-                      onChange={(e) => {
-                        if (e.currentTarget.value === ADD_CUSTOM_MODEL_VALUE) {
-                          onAddModel();
-                          return;
-                        }
-                        onModelChange(e.currentTarget.value);
-                      }}
-                      className="app-select-wrap editor-model-select"
-                      aria-label="Select model"
-                      data={[
-                        ...modelOptions.map((m) => ({ value: m.value, label: m.label })),
-                        { value: ADD_CUSTOM_MODEL_VALUE, label: "+ Add custom model..." },
-                      ]}
+                    <ModelSelector
+                      selectedModel={selectedModel}
+                      modelOptions={modelOptions}
+                      onModelChange={onModelChange}
+                      onAddModel={onAddModel}
+                      onRemoveModel={onRemoveModel}
                     />
                     <Button
                       color="primary"
