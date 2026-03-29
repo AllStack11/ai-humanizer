@@ -141,13 +141,14 @@ export function extractStreamTextChunk(payload) {
 }
 
 async function fetchWithApiKey(url, payload, runtime = {}) {
-  // If no explicit key in runtime config, check localStorage (device) before environment
+  // If no explicit key in runtime config, check environment before localStorage (device)
+  const envKey = import.meta.env.VITE_OPENROUTER_API_KEY;
   const storedKey = !isTauriRuntime() ? localStorage.getItem("vh:web:openrouter_api_key") : "";
-  const apiKey = runtime.apiKey || storedKey || import.meta.env.VITE_OPENROUTER_API_KEY || "";
+  const apiKey = runtime.apiKey || envKey || storedKey || "";
   const headers = {
     "Content-Type": "application/json",
-    "HTTP-Referer": window.location.origin,
-    "X-Title": "Voice Humanizer (Web)",
+    "HTTP-Referer": import.meta.env.VITE_OPENROUTER_APP_URL || window.location.origin,
+    "X-Title": import.meta.env.VITE_OPENROUTER_APP_NAME || "Voice Humanizer (Web)",
   };
   if (apiKey) {
     headers["Authorization"] = `Bearer ${apiKey}`;
