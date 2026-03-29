@@ -1,10 +1,10 @@
 [package]
-name = "app"
+name = "voice-humanizer"
 version = "1.0.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+description = "A powerful interface for rewriting text to match your personal writing style or expanding drafts with detail."
+authors = ["AllStack11"]
+license = "MIT"
+repository = "https://github.com/AllStack11/humanizer"
 edition = "2021"
 rust-version = "1.77.2"
 

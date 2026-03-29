@@ -62,6 +62,16 @@ You can customize the application's behavior using a `.env` file in the root dir
 - `VITE_OPENROUTER_API_URL`: Override the default OpenRouter API URL. 🌐
 - `VITE_OPENROUTER_APP_NAME`: Set the `X-Title` header for API requests. 🏷️
 
+## 🤝 Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get started.
+
+All participants are expected to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## 🛡️ Security
+
+If you discover a security vulnerability, please see our [Security Policy](SECURITY.md) for reporting instructions.
+
 ## 📄 License
 
-MIT 📜
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 📜

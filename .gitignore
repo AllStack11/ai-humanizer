@@ -38,6 +38,7 @@ tmp/
 temp/
 logs/
 *.log
+.voice-humanizer/
 src-tauri/.voice-humanizer/
 
 # Rust / Cargo / Tauri
@@ -63,7 +64,5 @@ __pycache__/
 # Test snapshots and misc artifacts
 *.snap
 *.seed
-src-tauri/.voice-humanizer/logs
-src-tauri/.voice-humanizer/logs/openrouter-debug.log
 .vercel
 .env*.local

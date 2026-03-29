@@ -1,7 +1,9 @@
 {
   "name": "voice-humanizer",
   "version": "1.0.0",
-  "private": true,
+  "description": "A powerful interface for rewriting text to match your personal writing style or expanding drafts with detail.",
+  "private": false,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "npm run tauri:dev",

@@ -18,7 +18,7 @@ We take the security of this project seriously. If you believe you have found a 
 Please **do not** open a public GitHub issue for security vulnerabilities. Instead, use one of the following methods:
 
 1.  **GitHub Security Advisory**: Submit a report privately via the [Security tab](https://github.com/AllStack11/humanizer/security/advisories/new) on GitHub.
-2.  **Email**: Send an email to [security@example.com](mailto:security@example.com) (Placeholder - please update with your actual security contact email).
+2.  **Email**: Send an email to [security@allstack11.com](mailto:security@allstack11.com).
 
 ### What to Include
 
