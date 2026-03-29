@@ -464,10 +464,15 @@ export default function App() {
     const tick = async () => {
       if (cancelled) return;
       setLogsLoading(true);
-      const logs = await loadRequestLogs();
-      if (!cancelled) {
-        setRequestLogs(logs);
-        setLogsLoading(false);
+      try {
+        const logs = await loadRequestLogs();
+        if (!cancelled) {
+          setRequestLogs(logs);
+        }
+      } catch {} finally {
+        if (!cancelled) {
+          setLogsLoading(false);
+        }
       }
       if (!cancelled) timer = setTimeout(tick, 2500);
     };

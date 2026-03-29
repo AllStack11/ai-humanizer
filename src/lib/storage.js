@@ -80,7 +80,14 @@ export async function saveStylesBackupRaw(stylesData) {
 }
 
 export async function loadRequestLogs() {
-  if (!isTauriRuntime()) return [];
+  if (!isTauriRuntime()) {
+    try {
+      const raw = localStorage.getItem(WEB_REQUEST_LOGS_KEY);
+      return Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
   try {
     const data = await tauriInvoke("get_request_logs");
     return Array.isArray(data?.logs) ? data.logs : [];
@@ -90,12 +97,26 @@ export async function loadRequestLogs() {
 }
 
 export async function clearRequestLogs() {
-  if (!isTauriRuntime()) return;
+  if (!isTauriRuntime()) {
+    localStorage.removeItem(WEB_REQUEST_LOGS_KEY);
+    return;
+  }
   try { await tauriInvoke("clear_request_logs"); } catch {}
 }
 
 export async function logDiagnosticEvent(route, request = {}, status = "info", extra = {}) {
-  if (!isTauriRuntime()) return;
+  if (!isTauriRuntime()) {
+    appendWebLog({
+      id: `diag-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      startedAt: new Date().toISOString(),
+      route,
+      status,
+      model: "app",
+      request,
+      ...extra,
+    });
+    return;
+  }
   try {
     await tauriInvoke("add_diagnostic_log", {
       payload: {
@@ -111,6 +132,32 @@ export async function logDiagnosticEvent(route, request = {}, status = "info", e
 
 const WEB_API_KEY_STORAGE_KEY = `${STORAGE_PREFIX}:web:openrouter_api_key`;
 const WEB_RUNTIME_CONFIG_KEY = `${STORAGE_PREFIX}:web:runtime_config`;
+const WEB_REQUEST_LOGS_KEY = `${STORAGE_PREFIX}:web:request_logs`;
+const MAX_WEB_LOGS = 60;
+
+function appendWebLog(logEntry) {
+  try {
+    const raw = localStorage.getItem(WEB_REQUEST_LOGS_KEY);
+    const logs = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(logs)) {
+      localStorage.setItem(WEB_REQUEST_LOGS_KEY, JSON.stringify([logEntry]));
+      return;
+    }
+    const next = [logEntry, ...logs].slice(0, MAX_WEB_LOGS);
+    localStorage.setItem(WEB_REQUEST_LOGS_KEY, JSON.stringify(next));
+  } catch (e) {
+    console.warn("Failed to append web log:", e);
+  }
+}
+
+export async function saveWebRequestLog(logEntry) {
+  if (isTauriRuntime()) return;
+  appendWebLog({
+    id: `web-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    startedAt: new Date().toISOString(),
+    ...logEntry,
+  });
+}
 
 export async function hasStoredApiKey(runtime) {
   if (!isTauriRuntime()) {

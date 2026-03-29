@@ -1,5 +1,6 @@
 import { MODEL_OPTIONS } from '../constants/models.js';
 import { isTauriRuntime, tauriInvoke, tauriListen } from './tauri.js';
+import { saveWebRequestLog } from './storage.js';
 
 const DEFAULT_STREAM_CHARS_PER_SECOND = import.meta.env?.MODE === "test" ? 420 : 380;
 
@@ -180,10 +181,33 @@ export async function llm(system, user, maxTokens = 2400, model = MODEL_OPTIONS[
     return d.content[0].text;
   }
 
+  const start = Date.now();
   const url = runtime.apiUrl || "https://openrouter.ai/api/v1/chat/completions";
-  const response = await fetchWithApiKey(url, payload, runtime);
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || "";
+  try {
+    const response = await fetchWithApiKey(url, payload, runtime);
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || "";
+    saveWebRequestLog({
+      route: "llm:chat",
+      model,
+      durationMs: Date.now() - start,
+      request: { system, messages: payload.messages },
+      responsePreview: content.slice(0, 200),
+      usage: data.usage,
+      status: "success",
+    });
+    return content;
+  } catch (e) {
+    saveWebRequestLog({
+      route: "llm:chat",
+      model,
+      durationMs: Date.now() - start,
+      request: { system, messages: payload.messages },
+      status: "error",
+      error: e instanceof Error ? e.message : String(e),
+    });
+    throw e;
+  }
 }
 
 export async function llmStream(system, user, onChunk, maxTokens = 2400, model = MODEL_OPTIONS[0].value, runtime = {}, options = {}) {
@@ -250,8 +274,24 @@ export async function llmStream(system, user, onChunk, maxTokens = 2400, model =
   }
 
   // Browser-based fetch streaming
+  const start = Date.now();
   const url = runtime.apiUrl || "https://openrouter.ai/api/v1/chat/completions";
-  const response = await fetchWithApiKey(url, streamPayload, runtime);
+  let response;
+  try {
+    response = await fetchWithApiKey(url, streamPayload, runtime);
+  } catch (e) {
+    saveWebRequestLog({
+      route: "llm:stream",
+      model,
+      durationMs: Date.now() - start,
+      request: { system, messages: streamPayload.messages },
+      status: "error",
+      error: e instanceof Error ? e.message : String(e),
+      stream: true,
+    });
+    throw e;
+  }
+
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -284,9 +324,27 @@ export async function llmStream(system, user, onChunk, maxTokens = 2400, model =
       }
     }
     await pacedEmitter.flush();
+    saveWebRequestLog({
+      route: "llm:stream",
+      model,
+      durationMs: Date.now() - start,
+      request: { system, messages: streamPayload.messages },
+      responsePreview: fullText.slice(0, 200),
+      status: "success",
+      stream: true,
+    });
     return fullText;
   } catch (e) {
     pacedEmitter.stop();
+    saveWebRequestLog({
+      route: "llm:stream",
+      model,
+      durationMs: Date.now() - start,
+      request: { system, messages: streamPayload.messages },
+      status: "error",
+      error: e instanceof Error ? e.message : String(e),
+      stream: true,
+    });
     throw e;
   }
 }
