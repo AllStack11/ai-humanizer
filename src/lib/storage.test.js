@@ -19,7 +19,7 @@ describe("storage browser compatibility", () => {
     
     const status = await getApiKeyStatus();
     expect(status.hasKey).toBe(true);
-    expect(status.source).toBe("browser_local_storage");
+    expect(status.source).toBe("device");
     
     expect(localStorage.getItem("vh:web:openrouter_api_key")).toBe("browser-test-key");
   });
