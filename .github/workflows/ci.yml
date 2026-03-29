@@ -1,3 +1,4 @@
+# Standard CI Workflow for Testing and Building
 name: CI
 
 on:
