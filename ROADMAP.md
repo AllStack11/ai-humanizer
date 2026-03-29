@@ -1,41 +1,21 @@
 # Roadmap
 
-Last updated: 2026-03-08
+Last updated: 2026-03-29
 
-## Recently Shipped
+Our focus is currently on maintaining stability and improving the core humanization engine.
 
-- Added local writing-metric engine with before/after scoring for:
-  - readability
-  - FKGL / Gunning Fog / SMOG / Coleman-Liau / ARI
-  - lexical diversity
-  - sentence complexity (average length + variance)
-  - passive voice ratio
-  - filler density
-  - repetition score
-  - concreteness score
-- Added a consolidated collapsible metrics panel directly under LLM output.
-- Added per-metric hover tooltips, metric icons, and trend color coding.
+## Future Plans
 
-## Near Term
+We have many exciting ideas for the future, but we're keeping our upcoming list flexible to prioritize what matters most to our users.
 
-- Add production CSP policy in `src-tauri/tauri.conf.json` (replace `csp: null`).
-- Reduce frontend initial bundle size through lazy loading and chunking.
-- Expand CI to include Rust/native validation (`cargo check`) on every PR.
+- **Continuous Improvement**: Ongoing refinements to the rewriting logic and user interface.
+- **Stability & Performance**: Ensuring a smooth experience across both web and desktop versions.
 
-## Product Enhancements
+## ✨ We’re Open to Ideas!
 
-- Add richer profile controls (more granular tone and domain presets).
-- Add user-configurable output presets (create, edit, save, and reuse custom presets).
-- Add cross-device writer profile sync for personal use (Mac, Windows PC, and mobile web), including profile read/update from any signed-in device.
-- Add account-based cloud profile storage (auth + encrypted-at-rest profile records + sync conflict handling).
-- Add user-configurable profile save location (choose where profile data is stored/backed up).
-- Add optional export/import tooling for local user data portability.
-- Add in-place partial regeneration: highlight selected output text and regenerate only that span.
-- Add first-class diff checking so users can inspect exact changes between source and generated output.
-- Add global availability support (localization, region-aware defaults, and timezone/locale-safe formatting).
+We want to build what you need. If you have a feature request, a suggestion for improvement, or have found a bug, please don't hesitate to reach out:
 
-## Reliability and Observability
+- **Open an Issue**: Share your thoughts on our GitHub issues page.
+- **Start a Discussion**: Join the conversation about the project's direction.
 
-- Harden provider error handling and retry diagnostics.
-- Add structured logging controls for debug vs production builds.
-- Add release smoke-test automation for packaged app startup and generation flow.
+Your feedback helps shape the future of Voice Humanizer! 🚀
