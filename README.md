@@ -12,28 +12,30 @@ A simple, powerful interface for rewriting text to sound like your voice or expa
 
 ## Cloud Deployment (Web Mode)
 
-This application is designed to be easily deployed to any static hosting provider (Vercel, Netlify, GitHub Pages, etc.).
+### Vercel Deployment
 
-### 1. Prerequisites
-- An [OpenRouter API Key](https://openrouter.ai/keys) (or any OpenAI-compatible API).
+This project is optimized for Vercel. The `vercel.json` file in the root directory automatically configures the build settings.
 
-### 2. Local Setup & Build
+1.  **Connect Your Repository**: Import this repository into Vercel.
+2.  **Environment Variables**: Add `VITE_OPENROUTER_API_KEY` in the Vercel dashboard if you want to provide a default key.
+3.  **Build Settings**: (Auto-configured by `vercel.json`)
+    - Build Command: `npm run build:web`
+    - Output Directory: `dist`
+    - Install Command: `npm install`
+
+### Manual Build
+
+To build the web version locally:
+
 ```bash
-# Install dependencies
 npm install
-
-# Build for the web
-npm run build
+npm run build:web
 ```
 
-### 3. Deploy
-You can deploy the `dist/` folder to any static hosting service.
+The resulting `dist/` folder can be hosted on any static provider (Netlify, GitHub Pages, etc.).
 
-- **Vercel**: Push your code to GitHub and connect the repository to Vercel. It will automatically detect the Vite project and deploy it.
-- **GitHub Pages**: Use the `gh-pages` package or GitHub Actions to deploy the `dist/` folder.
-
-### 4. Configuration
-When running in the browser, the app will prompt you for your **OpenRouter API Key**. This key is stored securely in your browser's `localStorage` and is never sent to any server other than the API provider you specify.
+### Configuration
+When running in the browser, the app will prompt you for your **OpenRouter API Key** if one isn't provided via environment variables. This key is stored securely in your browser's `localStorage`.
 
 ## Desktop Development (Tauri)
 
