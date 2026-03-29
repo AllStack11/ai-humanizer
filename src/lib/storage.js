@@ -56,6 +56,10 @@ export async function save(key, val) {
   try {
     const scoped = await resolveStorageKey(key);
     localStorage.setItem(scoped, JSON.stringify(val));
+    // Also save to global if it's a key that needs to be accessible across scopes
+    if (!scoped.startsWith(`${STORAGE_PREFIX}:default:`)) {
+      localStorage.setItem(`${STORAGE_PREFIX}:default:${key}`, JSON.stringify(val));
+    }
   } catch {}
 }
 
@@ -106,17 +110,22 @@ export async function logDiagnosticEvent(route, request = {}, status = "info", e
 }
 
 const WEB_API_KEY_STORAGE_KEY = `${STORAGE_PREFIX}:web:openrouter_api_key`;
+const WEB_RUNTIME_CONFIG_KEY = `${STORAGE_PREFIX}:web:runtime_config`;
 
 export async function hasStoredApiKey(runtime) {
   if (!isTauriRuntime()) {
-    return !!localStorage.getItem(WEB_API_KEY_STORAGE_KEY);
+    // If runtime config provides an apiUrl but no apiKey is needed (e.g. localhost), return true
+    const config = localStorage.getItem(WEB_RUNTIME_CONFIG_KEY);
+    const parsed = config ? JSON.parse(config) : {};
+    const key = localStorage.getItem(WEB_API_KEY_STORAGE_KEY);
+    return !!key || (!!parsed.apiUrl && parsed.apiUrl.includes("localhost"));
   }
   return tauriInvoke("has_api_key", { runtime: normalizeRuntimeConfig(runtime) });
 }
 
 export async function getApiKeyStatus(runtime) {
   if (!isTauriRuntime()) {
-    const hasKey = !!localStorage.getItem(WEB_API_KEY_STORAGE_KEY);
+    const hasKey = await hasStoredApiKey(runtime);
     return { hasKey, source: "browser_local_storage" };
   }
   try {
@@ -132,6 +141,9 @@ export async function getApiKeyStatus(runtime) {
 export async function storeApiKey(key, runtime) {
   if (!isTauriRuntime()) {
     localStorage.setItem(WEB_API_KEY_STORAGE_KEY, key);
+    if (runtime) {
+      localStorage.setItem(WEB_RUNTIME_CONFIG_KEY, JSON.stringify(runtime));
+    }
     return { ok: true };
   }
   return tauriInvoke("set_api_key", { key, runtime: normalizeRuntimeConfig(runtime) });
@@ -140,6 +152,7 @@ export async function storeApiKey(key, runtime) {
 export async function clearStoredApiKey(runtime) {
   if (!isTauriRuntime()) {
     localStorage.removeItem(WEB_API_KEY_STORAGE_KEY);
+    localStorage.removeItem(WEB_RUNTIME_CONFIG_KEY);
     return { ok: true };
   }
   return tauriInvoke("clear_api_key", { runtime: normalizeRuntimeConfig(runtime) });

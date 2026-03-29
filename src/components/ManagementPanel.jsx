@@ -122,22 +122,20 @@ export default function ManagementPanel({
         </Card.Content>
       </Card>
 
-      {isTauriRuntime() ? (
-        <Card className="app-card">
-          <Card.Content className="panel-grid p-3">
-            <label className="panel-title">
-              Provider
-            </label>
-            <Button variant="bordered" onPress={onOpenApiKey} aria-label="Open API key settings" tooltip="Open API key settings" iconOnly>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="7.5" cy="15.5" r="5.5" />
-                <path d="m21 2-9.6 9.6" />
-                <path d="m15.5 5.5 3 3" />
-              </svg>
-            </Button>
-          </Card.Content>
-        </Card>
-      ) : null}
+      <Card className="app-card">
+        <Card.Content className="panel-grid p-3">
+          <label className="panel-title">
+            Provider
+          </label>
+          <Button variant="bordered" onPress={onOpenApiKey} aria-label="Open API key settings" tooltip="Open API key settings" iconOnly>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="7.5" cy="15.5" r="5.5" />
+              <path d="m21 2-9.6 9.6" />
+              <path d="m15.5 5.5 3 3" />
+            </svg>
+          </Button>
+        </Card.Content>
+      </Card>
 
       <Card className="app-card">
         <Card.Content className="panel-grid p-3">

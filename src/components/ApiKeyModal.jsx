@@ -1,5 +1,6 @@
 import { Modal } from "@mantine/core";
 import { Button, Input } from "./AppUI.jsx";
+import { isTauriRuntime } from "../lib/tauri.js";
 
 export default function ApiKeyModal({
   required,
@@ -44,6 +45,7 @@ export default function ApiKeyModal({
 
         <p style={{ marginTop: 0, marginBottom: 14, fontSize: 13, color: "#655d52" }}>
           Configure endpoint + secret storage. For localhost providers (for example Ollama), API key can be empty.
+          {!isTauriRuntime() && " On the web, settings are stored in your browser's local storage."}
         </p>
 
         <div className="panel-grid">

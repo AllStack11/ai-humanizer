@@ -66,7 +66,6 @@ export default function App() {
   const PROFILE_STEP_DELAY_MS = 650;
 
   async function ensureApiKeyReady(actionLabel) {
-    if (!isTauriRuntime()) return true;
     pushProcessStep("Checking API key availability.");
     try {
       const keyStatus = await getApiKeyStatus(runtimeConfig);
@@ -409,11 +408,14 @@ export default function App() {
   }
 
   useEffect(() => {
-    save("styles-v3", styles);
     if (!backupSyncReadyRef.current) return;
+    save("styles-v3", styles);
     saveStylesBackupWithRetry(styles);
   }, [styles]);
-  useEffect(() => { save(CUSTOM_PROFILES_KEY, customProfiles); }, [customProfiles]);
+  useEffect(() => {
+    if (!backupSyncReadyRef.current) return;
+    save(CUSTOM_PROFILES_KEY, customProfiles);
+  }, [customProfiles]);
   useEffect(() => { save(RUNTIME_API_CONFIG_KEY, runtimeConfig); }, [runtimeConfig]);
 
   useEffect(() => {
@@ -536,7 +538,8 @@ export default function App() {
       return;
     }
 
-    save(`${STYLE_MODAL_DRAFT_KEY}:${activeProfileId}`, null);
+    await save(`${STYLE_MODAL_DRAFT_KEY}:${activeProfileId}`, null);
+    await save(`${WRITER_DRAFT_KEY}:${activeProfileId}`, null);
 
     const nextStyles = {
       ...styles,
@@ -550,8 +553,6 @@ export default function App() {
         createdAt: styles[activeProfileId]?.createdAt || new Date().toISOString(),
       },
     };
-
-    await save(`${STYLE_MODAL_DRAFT_KEY}:${activeProfileId}`, null);
     setStyles(nextStyles);
     await save("styles-v3", nextStyles);
     await saveStylesBackupWithRetry(nextStyles);
@@ -577,33 +578,35 @@ export default function App() {
     );
   }
 
-  function handleUpdateProfileMeta(profileId, metaUpdate) {
-    setStyles(prev => {
-      const existing = prev[profileId];
-      return {
-        ...prev,
-        [profileId]: {
-          ...(existing || {}),
-          meta: { ...normalizeProfileMeta(existing?.meta), ...metaUpdate },
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    });
+  async function handleUpdateProfileMeta(profileId, metaUpdate) {
+    const existing = styles[profileId];
+    const updatedStyles = {
+      ...styles,
+      [profileId]: {
+        ...(existing || {}),
+        meta: { ...normalizeProfileMeta(existing?.meta), ...metaUpdate },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    setStyles(updatedStyles);
+    await save("styles-v3", updatedStyles);
+    if (backupSyncReadyRef.current) await saveStylesBackupWithRetry(updatedStyles);
   }
 
-  function handleUpdateProfileTrait(profileId, traitUpdate) {
-    setStyles(prev => {
-      const existing = prev[profileId];
-      if (!existing) return prev;
-      return {
-        ...prev,
-        [profileId]: {
-          ...existing,
-          profile: { ...(existing.profile || {}), ...traitUpdate },
-          updatedAt: new Date().toISOString(),
-        },
-      };
-    });
+  async function handleUpdateProfileTrait(profileId, traitUpdate) {
+    const existing = styles[profileId];
+    if (!existing) return;
+    const updatedStyles = {
+      ...styles,
+      [profileId]: {
+        ...existing,
+        profile: { ...(existing.profile || {}), ...traitUpdate },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    setStyles(updatedStyles);
+    await save("styles-v3", updatedStyles);
+    if (backupSyncReadyRef.current) await saveStylesBackupWithRetry(updatedStyles);
   }
 
   function handleAddProfile() {
@@ -611,7 +614,7 @@ export default function App() {
     setAddProfileModalOpen(true);
   }
 
-  function confirmAddProfile() {
+  async function confirmAddProfile() {
     const name = newProfileName.trim();
     if (!name) return;
     // Slug-based ID with collision avoidance
@@ -623,7 +626,9 @@ export default function App() {
     let id = base;
     let n = 2;
     while (existingIds.has(id)) { id = `${base}-${n++}`; }
-    setCustomProfiles((prev) => [...prev, { id, label: name }]);
+    const nextCustomProfiles = [...customProfiles, { id, label: name }];
+    setCustomProfiles(nextCustomProfiles);
+    await save(CUSTOM_PROFILES_KEY, nextCustomProfiles);
     setActiveProfileId(id);
     setAddProfileModalOpen(false);
     setNewProfileName("");
@@ -639,7 +644,8 @@ export default function App() {
     const nextStyles = { ...styles };
     delete nextStyles[activeProfileId];
 
-    save(`${WRITER_DRAFT_KEY}:${activeProfileId}`, null);
+    await save(`${WRITER_DRAFT_KEY}:${activeProfileId}`, null);
+    await save(`${STYLE_MODAL_DRAFT_KEY}:${activeProfileId}`, null);
     setCustomProfiles(nextCustomProfiles);
     setStyles(nextStyles);
     await save("styles-v3", nextStyles);
@@ -736,13 +742,8 @@ export default function App() {
       setApiUrlInput("");
       setApiKeyFileInput("");
       setRuntimeConfig({ apiUrl: "", apiKeyFile: "" });
-      if (isTauriRuntime()) {
-        setApiKeyRequired(true);
-        setApiKeyModalOpen(true);
-      } else {
-        setApiKeyRequired(false);
-        setApiKeyModalOpen(false);
-      }
+      setApiKeyRequired(true);
+      setApiKeyModalOpen(true);
     } catch (e) {
       setError("Full reset failed: " + getErrorMessage(e));
     } finally {
@@ -1532,7 +1533,7 @@ export default function App() {
         />
       )}
 
-      {apiKeyModalOpen && isTauriRuntime() && (
+      {apiKeyModalOpen && (
         <ApiKeyModal
           required={apiKeyRequired}
           value={apiKeyInput}
