@@ -124,18 +124,30 @@ export async function hasStoredApiKey(runtime) {
 }
 
 export async function getApiKeyStatus(runtime) {
-  if (!isTauriRuntime()) {
-    const hasKey = await hasStoredApiKey(runtime);
-    return { hasKey, source: "browser_local_storage" };
+  // 1. Check Environment first
+  const envKey = import.meta.env?.VITE_OPENROUTER_API_KEY;
+  if (envKey && typeof envKey === "string" && envKey.trim().length > 0) {
+    return { hasKey: true, source: "environment", key: envKey };
   }
+
+  if (!isTauriRuntime()) {
+    const key = localStorage.getItem(WEB_API_KEY_STORAGE_KEY);
+    const config = localStorage.getItem(WEB_RUNTIME_CONFIG_KEY);
+    const parsed = config ? JSON.parse(config) : {};
+    const hasKey = !!key || (!!parsed.apiUrl && parsed.apiUrl.includes("localhost"));
+    return { hasKey, source: "device", key: key || "" };
+  }
+
   try {
     const status = await tauriInvoke("get_api_key_status", { runtime: normalizeRuntimeConfig(runtime) });
     if (status && typeof status.hasKey === "boolean" && typeof status.source === "string") {
-      return status;
+      return { ...status, source: status.source === "browser_local_storage" ? "device" : status.source };
     }
   } catch {}
-  const hasKey = await hasStoredApiKey(runtime);
-  return { hasKey, source: hasKey ? "unknown" : "missing" };
+
+  const key = localStorage.getItem(WEB_API_KEY_STORAGE_KEY);
+  const hasKey = !!key;
+  return { hasKey, source: hasKey ? "device" : "missing", key: key || "" };
 }
 
 export async function storeApiKey(key, runtime) {

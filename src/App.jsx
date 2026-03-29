@@ -164,6 +164,7 @@ export default function App() {
   const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
   const [apiKeyRequired, setApiKeyRequired] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [apiKeySource, setApiKeySource] = useState("missing");
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [apiUrlInput, setApiUrlInput] = useState("");
   const [apiKeyFileInput, setApiKeyFileInput] = useState("");
@@ -326,19 +327,14 @@ export default function App() {
         const stale = !storedTs || (Date.now() - new Date(storedTs)) > 3 * 86400000;
         if (stale) refreshCliches();
 
-        let hasKey = null;
-        let apiKeySource = isTauriRuntime() ? "missing" : "web";
-        if (isTauriRuntime()) {
-          try {
-            const keyStatus = await getApiKeyStatus(resolvedRuntimeConfig);
-            hasKey = keyStatus.hasKey;
-            apiKeySource = keyStatus.source;
-            if (!hasKey) {
-              setApiKeyRequired(true);
-              setApiKeyModalOpen(true);
-            }
-          } catch {}
-        }
+        try {
+          const keyStatus = await getApiKeyStatus(resolvedRuntimeConfig);
+          setApiKeySource(keyStatus.source || "missing");
+          if (!keyStatus.hasKey) {
+            setApiKeyRequired(true);
+            setApiKeyModalOpen(true);
+          }
+        } catch {}
 
         logDiagnosticEvent("app:init:config_loaded", {
           selectedModel: (typeof storedModel === "string" && storedModel.trim()) ? storedModel : MODEL_OPTIONS[0].value,
@@ -1425,23 +1421,28 @@ export default function App() {
         overlayProps={{ backgroundOpacity: 0.18, blur: 4 }}
         transitionProps={drawerTransitionProps}
       >
-        <ManagementPanel
-          themeKey={themeKey}
-          onThemeChange={setThemeKey}
-          clichesUpdatedAt={clichesUpdatedAt}
-          cliches={cliches}
-          onRefreshCliches={refreshCliches}
-          onUpdateCliches={async (updated) => { setCliches(updated); await save("cliches-v3", updated); }}
-          clicheFetching={clicheFetching}
-          hasProfile={hasProfile}
-          isCustomProfile={customProfiles.some((p) => p.id === activeProfileId)}
-          onExportProfile={exportProfile}
-          onImportProfile={importProfile}
-          onOpenApiKey={() => setApiKeyModalOpen(true)}
-          onResetProfile={resetActiveProfile}
-          onDeleteProfile={handleDeleteCustomProfile}
-          onFullAppReset={() => setResetConfirmOpen(true)}
-        />
+      <ManagementPanel
+        themeKey={themeKey}
+        onThemeChange={setThemeKey}
+        clichesUpdatedAt={clichesUpdatedAt}
+        cliches={cliches}
+        onRefreshCliches={refreshCliches}
+        onUpdateCliches={async (updated) => { setCliches(updated); await save("cliches-v3", updated); }}
+        clicheFetching={clicheFetching}
+        hasProfile={hasProfile}
+        isCustomProfile={customProfiles.some((p) => p.id === activeProfileId)}
+        onExportProfile={exportProfile}
+        onImportProfile={importProfile}
+        onOpenApiKey={() => {
+          getApiKeyStatus(runtimeConfig).then(status => {
+            setApiKeySource(status.source);
+            setApiKeyModalOpen(true);
+          });
+        }}
+        onResetProfile={resetActiveProfile}
+        onDeleteProfile={handleDeleteCustomProfile}
+        onFullAppReset={() => setResetConfirmOpen(true)}
+      />
       </Drawer>
 
       <Modal
@@ -1537,6 +1538,7 @@ export default function App() {
         <ApiKeyModal
           required={apiKeyRequired}
           value={apiKeyInput}
+          source={apiKeySource}
           apiUrl={apiUrlInput}
           apiKeyFile={apiKeyFileInput}
           loading={apiKeySaving}
@@ -1547,6 +1549,7 @@ export default function App() {
             setRuntimeConfig(updated);
             getApiKeyStatus(updated).then((status) => {
               setApiKeyRequired(!status.hasKey);
+              setApiKeySource(status.source);
             }).catch(() => {});
           }}
           onApiKeyFileChange={(next) => {
@@ -1555,6 +1558,7 @@ export default function App() {
             setRuntimeConfig(updated);
             getApiKeyStatus(updated).then((status) => {
               setApiKeyRequired(!status.hasKey);
+              setApiKeySource(status.source);
             }).catch(() => {});
           }}
           onSave={saveApiKey}

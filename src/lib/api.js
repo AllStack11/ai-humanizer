@@ -140,7 +140,9 @@ export function extractStreamTextChunk(payload) {
 }
 
 async function fetchWithApiKey(url, payload, runtime = {}) {
-  const apiKey = runtime.apiKey || import.meta.env.VITE_OPENROUTER_API_KEY || "";
+  // If no explicit key in runtime config, check localStorage (device) before environment
+  const storedKey = !isTauriRuntime() ? localStorage.getItem("vh:web:openrouter_api_key") : "";
+  const apiKey = runtime.apiKey || storedKey || import.meta.env.VITE_OPENROUTER_API_KEY || "";
   const headers = {
     "Content-Type": "application/json",
     "HTTP-Referer": window.location.origin,
