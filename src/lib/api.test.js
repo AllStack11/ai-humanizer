@@ -2,6 +2,10 @@ import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 import { createPacedStreamEmitter, extractStreamTextChunk, llm, llmStream } from "./api.js";
 import * as tauri from "./tauri.js";
 
+// Mock fetch for browser-based tests
+global.fetch = vi.fn();
+const mockFetch = global.fetch;
+
 describe("extractStreamTextChunk", () => {
   test("extracts delta string content", () => {
     const result = extractStreamTextChunk({
@@ -121,5 +125,86 @@ describe("createPacedStreamEmitter", () => {
 
     expect(events).toEqual([{ chunk: "fast", fullText: "fast" }]);
     expect(flushed).toBe("fast");
+  });
+});
+
+describe("llm() browser compatibility", () => {
+  beforeEach(() => {
+    vi.spyOn(tauri, "isTauriRuntime").mockReturnValue(false);
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("uses fetch in browser mode", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "browser response" } }],
+      }),
+    });
+
+    const result = await llm("sys", "user", 400, "model", { apiKey: "test-key" });
+
+    expect(result).toBe("browser response");
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://openrouter.ai/api/v1/chat/completions",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-key",
+        }),
+      })
+    );
+  });
+
+  test("throws error on failed fetch", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: { message: "Invalid API Key" } }),
+    });
+
+    await expect(llm("sys", "user", 400, "model")).rejects.toThrow("Invalid API Key");
+  });
+});
+
+describe("llmStream() browser compatibility", () => {
+  beforeEach(() => {
+    vi.spyOn(tauri, "isTauriRuntime").mockReturnValue(false);
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("uses fetch streaming in browser mode", async () => {
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"chunk1"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"chunk2"}}]}\n\n'));
+        controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
+
+    mockFetch.mockResolvedValue({
+      ok: true,
+      body: stream,
+    });
+
+    const chunks = [];
+    const onChunk = (c) => chunks.push(c);
+
+    const result = await llmStream("sys", "user", onChunk, 400, "model", {
+      apiKey: "test-key",
+      streamPacing: { enabled: false },
+    });
+
+    expect(result).toBe("chunk1chunk2");
+    expect(chunks).toEqual(["chunk1", "chunk2"]);
+    expect(mockFetch).toHaveBeenCalled();
   });
 });

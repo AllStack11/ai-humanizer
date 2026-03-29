@@ -372,8 +372,13 @@ export default function WriterPanel({
 
       if (isTauriRuntime()) {
         try {
-          const nativeText = await tauriInvoke("read_clipboard_text");
-          if (typeof nativeText === "string") pastedText = nativeText;
+          if (isTauriRuntime()) {
+            const nativeText = await tauriInvoke("read_clipboard_text");
+            if (typeof nativeText === "string") pastedText = nativeText;
+          } else {
+            const nativeText = await navigator.clipboard.readText();
+            if (typeof nativeText === "string") pastedText = nativeText;
+          }
         } catch {}
       }
 

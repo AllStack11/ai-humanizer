@@ -105,13 +105,20 @@ export async function logDiagnosticEvent(route, request = {}, status = "info", e
   } catch {}
 }
 
+const WEB_API_KEY_STORAGE_KEY = `${STORAGE_PREFIX}:web:openrouter_api_key`;
+
 export async function hasStoredApiKey(runtime) {
-  if (!isTauriRuntime()) return true;
+  if (!isTauriRuntime()) {
+    return !!localStorage.getItem(WEB_API_KEY_STORAGE_KEY);
+  }
   return tauriInvoke("has_api_key", { runtime: normalizeRuntimeConfig(runtime) });
 }
 
 export async function getApiKeyStatus(runtime) {
-  if (!isTauriRuntime()) return { hasKey: true, source: "web" };
+  if (!isTauriRuntime()) {
+    const hasKey = !!localStorage.getItem(WEB_API_KEY_STORAGE_KEY);
+    return { hasKey, source: "browser_local_storage" };
+  }
   try {
     const status = await tauriInvoke("get_api_key_status", { runtime: normalizeRuntimeConfig(runtime) });
     if (status && typeof status.hasKey === "boolean" && typeof status.source === "string") {
@@ -123,12 +130,18 @@ export async function getApiKeyStatus(runtime) {
 }
 
 export async function storeApiKey(key, runtime) {
-  if (!isTauriRuntime()) return { ok: true };
+  if (!isTauriRuntime()) {
+    localStorage.setItem(WEB_API_KEY_STORAGE_KEY, key);
+    return { ok: true };
+  }
   return tauriInvoke("set_api_key", { key, runtime: normalizeRuntimeConfig(runtime) });
 }
 
 export async function clearStoredApiKey(runtime) {
-  if (!isTauriRuntime()) return { ok: true };
+  if (!isTauriRuntime()) {
+    localStorage.removeItem(WEB_API_KEY_STORAGE_KEY);
+    return { ok: true };
+  }
   return tauriInvoke("clear_api_key", { runtime: normalizeRuntimeConfig(runtime) });
 }
 
