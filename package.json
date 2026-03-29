@@ -22,6 +22,7 @@
     "version:bump:major": "npm version major --no-git-tag-version && npm run version:sync"
   },
   "dependencies": {
+    "esbuild": "^0.25.0",
     "@mantine/core": "^8.3.16",
     "@mantine/hooks": "^8.3.16",
     "@tauri-apps/api": "^2.10.1",

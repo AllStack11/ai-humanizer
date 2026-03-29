@@ -307,6 +307,17 @@ fn append_debug_log(line: &str) {
   }
 
   let mut safe_line = line.replace('\r', "\\r").replace('\n', "\\n");
+  // Redact potential Bearer tokens or API keys from logs
+  if safe_line.contains("Bearer ") {
+    if let Some(idx) = safe_line.find("Bearer ") {
+      let end = safe_line[idx + 7..]
+        .find(' ')
+        .map(|i| idx + 7 + i)
+        .unwrap_or(safe_line.len());
+      safe_line.replace_range(idx + 7..end, "<REDACTED>");
+    }
+  }
+
   if safe_line.len() > 4000 {
     safe_line.truncate(4000);
     safe_line.push_str("...<truncated>");
@@ -772,8 +783,8 @@ async fn openrouter_chat(
   let mut request_body = json!({
     "model": model,
     "messages": messages,
-    "max_tokens": payload.max_tokens.unwrap_or(2400),
-    "temperature": payload.temperature,
+    "max_tokens": payload.max_tokens.unwrap_or(2400).min(32000),
+    "temperature": payload.temperature.map(|t| t.max(0.0).min(2.0)),
   });
   if let Some(fp) = payload.frequency_penalty {
     request_body["frequency_penalty"] = json!(fp);
@@ -953,8 +964,8 @@ async fn openrouter_chat_stream(
   let mut request_body = json!({
     "model": model,
     "messages": messages,
-    "max_tokens": payload.max_tokens.unwrap_or(2400),
-    "temperature": payload.temperature,
+    "max_tokens": payload.max_tokens.unwrap_or(2400).min(32000),
+    "temperature": payload.temperature.map(|t| t.max(0.0).min(2.0)),
     "stream": true,
   });
   if let Some(fp) = payload.frequency_penalty {
@@ -1300,6 +1311,12 @@ fn save_styles_backup(app: tauri::AppHandle, styles: Value) -> Result<SaveStyles
     .map_err(|e| format!("Failed to serialize backup payload: {e}"))?;
   let tmp_path = PathBuf::from(format!("{}.tmp", path.to_string_lossy()));
   fs::write(&tmp_path, formatted).map_err(|e| format!("Failed to write temp backup file: {e}"))?;
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::PermissionsExt;
+    let perms = fs::Permissions::from_mode(0o600);
+    let _ = fs::set_permissions(&tmp_path, perms);
+  }
 
   if path.exists() {
     fs::remove_file(&path).map_err(|e| format!("Failed to replace previous backup file: {e}"))?;
