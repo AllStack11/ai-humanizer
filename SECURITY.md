@@ -2,20 +2,35 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+The following versions of **Voice Humanizer** are currently supported with security updates:
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+| 1.0.x   | :white_check_mark: |
+| < 1.0   | :x:                |
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+We take the security of this project seriously. If you believe you have found a security vulnerability, please report it to us responsibly.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+### How to Report
+
+Please **do not** open a public GitHub issue for security vulnerabilities. Instead, use one of the following methods:
+
+1.  **GitHub Security Advisory**: Submit a report privately via the [Security tab](https://github.com/AllStack11/humanizer/security/advisories/new) on GitHub.
+2.  **Email**: Send an email to [security@example.com](mailto:security@example.com) (Placeholder - please update with your actual security contact email).
+
+### What to Include
+
+When reporting a vulnerability, please include as much information as possible to help us understand and reproduce the issue:
+
+-   A description of the vulnerability.
+-   Steps to reproduce the issue.
+-   Potential impact of the vulnerability.
+-   Any suggested fixes or mitigations.
+
+### Our Process
+
+-   We will acknowledge receipt of your report within 48 hours.
+-   We will investigate and provide an initial response within 5 business days.
+-   If the vulnerability is confirmed, we will work on a fix and coordinate a public disclosure once the fix is available.
