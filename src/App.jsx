@@ -327,10 +327,14 @@ export default function App() {
         const stale = !storedTs || (Date.now() - new Date(storedTs)) > 3 * 86400000;
         if (stale) refreshCliches();
 
+        let finalApiKeyPresent = false;
+        let finalApiKeySource = "missing";
         try {
           const keyStatus = await getApiKeyStatus(resolvedRuntimeConfig);
-          setApiKeySource(keyStatus.source || "missing");
-          if (!keyStatus.hasKey) {
+          finalApiKeyPresent = !!keyStatus?.hasKey;
+          finalApiKeySource = keyStatus?.source || "missing";
+          setApiKeySource(finalApiKeySource);
+          if (!finalApiKeyPresent) {
             setApiKeyRequired(true);
             setApiKeyModalOpen(true);
           }
@@ -341,8 +345,8 @@ export default function App() {
           clichesLoaded: Array.isArray(storedCliches) ? storedCliches.length : 0,
           clichesUpdatedAt: storedTs || null,
           writerDraftChars: typeof storedWriterDraft === "string" ? storedWriterDraft.length : 0,
-          apiKeyPresent: hasKey,
-          apiKeySource,
+          apiKeyPresent: finalApiKeyPresent,
+          apiKeySource: finalApiKeySource,
           clichesRefreshTriggered: stale,
         }).catch(() => {});
       } catch (error) {
