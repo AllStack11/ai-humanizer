@@ -63,3 +63,48 @@
 2026-03-29T15:33:28.451112+00:00 openrouter_chat_stream start request_id=1774798408354-lghxt4vl model=anthropic/claude-sonnet-4-6 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=2646
 2026-03-29T15:33:30.173777+00:00 openrouter_chat_stream done_marker request_id=1774798408354-lghxt4vl model=anthropic/claude-sonnet-4-6
 2026-03-29T15:33:30.174673+00:00 openrouter_chat_stream completed request_id=1774798408354-lghxt4vl model=anthropic/claude-sonnet-4-6 chars=95 events=11 chunks=8 parse_errors=0
+2026-03-29T15:39:29.615181+00:00 openrouter_chat_stream start request_id=1774798769577-ztqqzv7u model=anthropic/claude-sonnet-4-6 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=9140
+2026-03-29T15:39:32.709211+00:00 openrouter_chat_stream done_marker request_id=1774798769577-ztqqzv7u model=anthropic/claude-sonnet-4-6
+2026-03-29T15:39:32.709816+00:00 openrouter_chat_stream completed request_id=1774798769577-ztqqzv7u model=anthropic/claude-sonnet-4-6 chars=703 events=47 chunks=44 parse_errors=0
+2026-03-29T15:39:47.718021+00:00 openrouter_chat_stream start request_id=1774798787467-3ijwu3ke model=anthropic/claude-sonnet-4-6 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=9962
+2026-03-29T15:39:51.694362+00:00 openrouter_chat_stream done_marker request_id=1774798787467-3ijwu3ke model=anthropic/claude-sonnet-4-6
+2026-03-29T15:39:51.701634+00:00 openrouter_chat_stream completed request_id=1774798787467-3ijwu3ke model=anthropic/claude-sonnet-4-6 chars=704 events=51 chunks=48 parse_errors=0
+2026-03-29T15:50:05.999872+00:00 openrouter_chat_stream start request_id=1774799405709-iz3uaxs9 model=anthropic/claude-sonnet-4-6 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=3230
+2026-03-29T15:50:09.664685+00:00 openrouter_chat_stream done_marker request_id=1774799405709-iz3uaxs9 model=anthropic/claude-sonnet-4-6
+2026-03-29T15:50:09.665105+00:00 openrouter_chat_stream completed request_id=1774799405709-iz3uaxs9 model=anthropic/claude-sonnet-4-6 chars=655 events=48 chunks=45 parse_errors=0
+2026-03-29T15:50:28.432897+00:00 openrouter_chat_stream start request_id=1774799428362-l3z297fz model=anthropic/claude-sonnet-4-6 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=2646
+2026-03-29T15:50:29.432417+00:00 openrouter_chat_stream done_marker request_id=1774799428362-l3z297fz model=anthropic/claude-sonnet-4-6
+2026-03-29T15:50:29.439055+00:00 openrouter_chat_stream completed request_id=1774799428362-l3z297fz model=anthropic/claude-sonnet-4-6 chars=57 events=9 chunks=6 parse_errors=0
+2026-03-29T15:51:49.220260+00:00 openrouter_chat_stream start request_id=1774799509141-zne3bhjj model=anthropic/claude-sonnet-4-6 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=2646
+2026-03-29T15:51:50.547135+00:00 openrouter_chat_stream done_marker request_id=1774799509141-zne3bhjj model=anthropic/claude-sonnet-4-6
+2026-03-29T15:51:50.547590+00:00 openrouter_chat_stream completed request_id=1774799509141-zne3bhjj model=anthropic/claude-sonnet-4-6 chars=77 events=12 chunks=9 parse_errors=0
+2026-03-29T16:28:30.030864+00:00 openrouter_chat_stream start request_id=1774801709833-x7d3hflq model=deepseek/deepseek-v3.2-speciale url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=2199
+2026-03-29T16:28:37.424239+00:00 openrouter_chat_stream done_marker request_id=1774801709833-x7d3hflq model=deepseek/deepseek-v3.2-speciale
+2026-03-29T16:28:37.424708+00:00 openrouter_chat_stream completed request_id=1774801709833-x7d3hflq model=deepseek/deepseek-v3.2-speciale chars=0 events=283 chunks=0 parse_errors=0
+2026-03-29T16:28:42.256405+00:00 openrouter_chat_stream start request_id=1774801722222-2pybot2t model=deepseek/deepseek-v3.2-speciale url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=2199
+2026-03-29T16:28:51.701768+00:00 openrouter_chat_stream done_marker request_id=1774801722222-2pybot2t model=deepseek/deepseek-v3.2-speciale
+2026-03-29T16:28:51.702393+00:00 openrouter_chat_stream completed request_id=1774801722222-2pybot2t model=deepseek/deepseek-v3.2-speciale chars=0 events=283 chunks=0 parse_errors=0
+2026-03-29T16:29:08.575160+00:00 openrouter_chat_stream start request_id=1774801748544-0bmarpso model=minimax/minimax-m2.5 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=2199
+2026-03-29T16:29:13.999942+00:00 openrouter_chat_stream done_marker request_id=1774801748544-0bmarpso model=minimax/minimax-m2.5
+2026-03-29T16:29:14.000411+00:00 openrouter_chat_stream completed request_id=1774801748544-0bmarpso model=minimax/minimax-m2.5 chars=0 events=281 chunks=0 parse_errors=0
+2026-03-29T16:29:24.652345+00:00 openrouter_chat_stream start request_id=1774801764625-rwm2vi0v model=anthropic/claude-sonnet-4-6 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=2199
+2026-03-29T16:29:31.842914+00:00 openrouter_chat_stream done_marker request_id=1774801764625-rwm2vi0v model=anthropic/claude-sonnet-4-6
+2026-03-29T16:29:31.843863+00:00 openrouter_chat_stream completed request_id=1774801764625-rwm2vi0v model=anthropic/claude-sonnet-4-6 chars=919 events=135 chunks=132 parse_errors=0
+2026-03-29T16:29:36.469742+00:00 openrouter_chat_stream start request_id=1774801776358-zbmfe2km model=writer/palmyra-x5 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=2199
+2026-03-29T16:39:22.664394+00:00 openrouter_chat_stream start request_id=1774802361842-exzn5x4u model=minimax/minimax-m2.5 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=3230
+2026-03-29T16:39:26.432369+00:00 openrouter_chat_stream done_marker request_id=1774802361842-exzn5x4u model=minimax/minimax-m2.5
+2026-03-29T16:39:26.432840+00:00 openrouter_chat_stream completed request_id=1774802361842-exzn5x4u model=minimax/minimax-m2.5 chars=438 events=301 chunks=104 parse_errors=0
+2026-03-29T16:40:17.993265+00:00 openrouter_chat_stream start request_id=1774802417953-481e4jfx model=deepseek/deepseek-v3.2-speciale url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=3230
+2026-03-29T16:40:32.972222+00:00 openrouter_chat_stream done_marker request_id=1774802417953-481e4jfx model=deepseek/deepseek-v3.2-speciale
+2026-03-29T16:40:32.972774+00:00 openrouter_chat_stream completed request_id=1774802417953-481e4jfx model=deepseek/deepseek-v3.2-speciale chars=0 events=303 chunks=0 parse_errors=0
+2026-03-29T16:41:36.581199+00:00 openrouter_chat_stream start request_id=1774802496000-rcprh68a model=meta-llama/llama-3.3-70b-instruct url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=3230
+2026-03-29T16:41:44.607083+00:00 openrouter_chat_stream done_marker request_id=1774802496000-rcprh68a model=meta-llama/llama-3.3-70b-instruct
+2026-03-29T16:41:44.608656+00:00 openrouter_chat_stream completed request_id=1774802496000-rcprh68a model=meta-llama/llama-3.3-70b-instruct chars=939 events=217 chunks=214 parse_errors=0
+2026-03-29T16:43:45.116609+00:00 openrouter_chat_stream start request_id=1774802624171-03a3gb8o model=deepseek/deepseek-chat url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=3230
+2026-03-29T16:43:45.744137+00:00 openrouter_chat_stream http_error request_id=1774802624171-03a3gb8o model=deepseek/deepseek-chat status=429 body_preview={"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"deepseek/deepseek-chat is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations","provider_name":"DeepInfra","is_byok":false}},"user_id":"user_39YSrYvcIv0tnxa4Y7mfrOdzcjF"}
+2026-03-29T16:46:30.557865+00:00 openrouter_chat_stream start request_id=1774802790061-8gh2j86y model=deepseek/deepseek-v3.2 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=3230
+2026-03-29T16:46:37.500630+00:00 openrouter_chat_stream done_marker request_id=1774802790061-8gh2j86y model=deepseek/deepseek-v3.2
+2026-03-29T16:46:37.501284+00:00 openrouter_chat_stream completed request_id=1774802790061-8gh2j86y model=deepseek/deepseek-v3.2 chars=695 events=103 chunks=100 parse_errors=0
+2026-03-29T16:47:06.219852+00:00 openrouter_chat_stream start request_id=1774802826156-mbfhcd0b model=deepseek/deepseek-v3.2 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=2646
+2026-03-29T16:47:12.505650+00:00 openrouter_chat_stream done_marker request_id=1774802826156-mbfhcd0b model=deepseek/deepseek-v3.2
+2026-03-29T16:47:12.506849+00:00 openrouter_chat_stream completed request_id=1774802826156-mbfhcd0b model=deepseek/deepseek-v3.2 chars=87 events=24 chunks=21 parse_errors=0

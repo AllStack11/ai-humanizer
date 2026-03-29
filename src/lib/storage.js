@@ -7,7 +7,6 @@ const LEGACY_KEYS = [
   "cliches-v3",
   "cliches-ts-v3",
   "writer-editor-draft-v1",
-  "output-history-v2",
   "style-modal-draft-v1",
   "runtime-api-config-v1",
   "selected-model-v1",

@@ -5,7 +5,6 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import { Button, Card, Spinner } from "./AppUI.jsx";
-import SessionHistoryPanel from "./SessionHistoryPanel.jsx";
 import { renderMarkdownToHtml } from "../utils/markdown.js";
 import { DynamicHighlighter, SelectionAwareHighlighter } from "../lib/tiptap-highlighter.js";
 import { buildClicheRanges } from "../utils/diff.js";
@@ -560,10 +559,6 @@ export default function OutputPanel({
   onCopy,
   onRegenerate,
   onRegenerateWithFeedback,
-  sessionEntries = [],
-  selectedHistoryPreviewEntryId = null,
-  onSelectHistoryPreview,
-  onCopySessionHistoryPart,
   cliches = [],
   onPartialRegen,
   isPartialStreaming = false,
@@ -885,17 +880,6 @@ export default function OutputPanel({
           </div>
         ) : null}
 
-        {!isStreaming && sessionEntries.length ? (
-          <>
-            <div className="output-session-divider" aria-hidden="true" />
-            <SessionHistoryPanel
-              entries={sessionEntries}
-              selectedEntryId={selectedHistoryPreviewEntryId}
-              onSelectEntry={onSelectHistoryPreview}
-              onCopyEntryPart={onCopySessionHistoryPart}
-            />
-          </>
-        ) : null}
       </Card.Content>
     </Card>
   );

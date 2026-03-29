@@ -536,6 +536,7 @@ fn update_log_entry(state: &State<'_, AppState>, id: &str, patch: Value) {
 }
 
 fn extract_text(openrouter_response: &Value) -> String {
+  // Try content.text format (some OpenRouter responses)
   if let Some(text) = openrouter_response
     .get("content")
     .and_then(Value::as_array)
@@ -546,6 +547,7 @@ fn extract_text(openrouter_response: &Value) -> String {
     return text.to_string();
   }
 
+  // Try choices[0].message.content as string (standard OpenAI format)
   if let Some(text) = openrouter_response
     .get("choices")
     .and_then(Value::as_array)
@@ -557,6 +559,7 @@ fn extract_text(openrouter_response: &Value) -> String {
     return text.to_string();
   }
 
+  // Try choices[0].message.content as array (multi-modal)
   if let Some(parts) = openrouter_response
     .get("choices")
     .and_then(Value::as_array)
@@ -571,7 +574,29 @@ fn extract_text(openrouter_response: &Value) -> String {
         full.push_str(text);
       }
     }
-    return full;
+    if !full.is_empty() {
+      return full;
+    }
+  }
+
+  // Try choices[0].text directly (some older or alternative formats)
+  if let Some(text) = openrouter_response
+    .get("choices")
+    .and_then(Value::as_array)
+    .and_then(|arr| arr.first())
+    .and_then(|choice| choice.get("text"))
+    .and_then(Value::as_str)
+  {
+    return text.to_string();
+  }
+
+  // Debug: log the structure if we can't extract text
+  let response_str = serde_json::to_string(openrouter_response).unwrap_or_else(|_| "invalid json".to_string());
+  if response_str.len() > 500 {
+    let truncated = &response_str[..500];
+    append_debug_log(&format!("extract_text: could not extract text from response (truncated): {}", truncated));
+  } else {
+    append_debug_log(&format!("extract_text: could not extract text from response: {}", response_str));
   }
 
   String::new()
@@ -583,29 +608,84 @@ fn extract_stream_text_chunk(openrouter_response: &Value) -> String {
     .and_then(Value::as_array)
     .and_then(|arr| arr.first());
   let Some(choice) = choice else {
+    // Debug: log the structure if there's no choices array
+    let response_str = serde_json::to_string(openrouter_response).unwrap_or_else(|_| "invalid json".to_string());
+    if response_str.len() > 500 {
+      let truncated = &response_str[..500];
+      append_debug_log(&format!("extract_stream_text_chunk: no choices array in response (truncated): {}", truncated));
+    } else {
+      append_debug_log(&format!("extract_stream_text_chunk: no choices array in response: {}", response_str));
+    }
     return String::new();
   };
 
-  let delta = choice.get("delta").and_then(|d| d.get("content"));
-  if let Some(text) = delta.and_then(Value::as_str) {
+  // Try delta.content (streaming response)
+  let delta = choice.get("delta");
+  if let Some(delta) = delta {
+    // Check delta.content as string
+    if let Some(text) = delta.get("content").and_then(Value::as_str) {
+      return text.to_string();
+    }
+    // Check delta.content as array
+    if let Some(parts) = delta.get("content").and_then(Value::as_array) {
+      return parts
+        .iter()
+        .filter_map(|p| p.get("text").and_then(Value::as_str))
+        .collect::<String>();
+    }
+    // Some models might have text directly in delta
+    if let Some(text) = delta.get("text").and_then(Value::as_str) {
+      return text.to_string();
+    }
+    // Some models might have content directly as a string in delta
+    if let Some(text) = delta.as_str() {
+      return text.to_string();
+    }
+  }
+
+  // Try choice.text directly (some models might put text at choice level)
+  if let Some(text) = choice.get("text").and_then(Value::as_str) {
     return text.to_string();
   }
-  if let Some(parts) = delta.and_then(Value::as_array) {
+
+  // Try choice.content directly (some models might put content at choice level)
+  if let Some(text) = choice.get("content").and_then(Value::as_str) {
+    return text.to_string();
+  }
+  if let Some(parts) = choice.get("content").and_then(Value::as_array) {
     return parts
       .iter()
       .filter_map(|p| p.get("text").and_then(Value::as_str))
       .collect::<String>();
   }
 
-  let message_content = choice.get("message").and_then(|m| m.get("content"));
-  if let Some(text) = message_content.and_then(Value::as_str) {
-    return text.to_string();
+  // Try message.content (non-streaming or final response)
+  let message = choice.get("message");
+  if let Some(message) = message {
+    // Check message.content as string
+    if let Some(text) = message.get("content").and_then(Value::as_str) {
+      return text.to_string();
+    }
+    // Check message.content as array
+    if let Some(parts) = message.get("content").and_then(Value::as_array) {
+      return parts
+        .iter()
+        .filter_map(|p| p.get("text").and_then(Value::as_str))
+        .collect::<String>();
+    }
+    // Some models might have text directly in message
+    if let Some(text) = message.get("text").and_then(Value::as_str) {
+      return text.to_string();
+    }
   }
-  if let Some(parts) = message_content.and_then(Value::as_array) {
-    return parts
-      .iter()
-      .filter_map(|p| p.get("text").and_then(Value::as_str))
-      .collect::<String>();
+
+  // Debug: log the structure if we can't extract text
+  let response_str = serde_json::to_string(openrouter_response).unwrap_or_else(|_| "invalid json".to_string());
+  if response_str.len() > 500 {
+    let truncated = &response_str[..500];
+    append_debug_log(&format!("extract_stream_text_chunk: could not extract text from response (truncated): {}", truncated));
+  } else {
+    append_debug_log(&format!("extract_stream_text_chunk: could not extract text from response: {}", response_str));
   }
 
   String::new()

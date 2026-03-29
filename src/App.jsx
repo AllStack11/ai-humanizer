@@ -18,21 +18,6 @@ import {
   getApiKeyStatus, storeApiKey, clearStoredApiKey,
   logDiagnosticEvent, resetAppData,
 } from './lib/storage.js';
-import {
-  appendHistoryEntry,
-  buildHistoryUserText,
-  buildSessionThreadKey,
-  createEmptyOutputHistory,
-  getOrCreateActiveSession,
-  listSessionEntries,
-  loadOutputHistory,
-  pruneUnsavedEntries,
-  saveOutputHistory,
-  searchHistoryEntries,
-  updateHistoryEntry,
-  deleteHistoryEntry,
-  deleteHistoryEntriesForProfile,
-} from './lib/output-history.js';
 import { STYLE_ANALYZE_SYS, STYLE_MERGE_SYS, HUMANIZE_SYS, ELABORATE_SYS, PARTIAL_REGEN_SYS, buildPartialRegenUserPrompt } from './lib/prompts.js';
 import {
   dedupeSampleEntries,
@@ -71,7 +56,6 @@ import ProcessLogPanel from './components/ProcessLogPanel.jsx';
 import MergeProgressModal from './components/MergeProgressModal.jsx';
 import AddModelModal from './components/AddModelModal.jsx';
 import ResetConfirmModal from './components/ResetConfirmModal.jsx';
-import OutputHistoryDrawer from './components/OutputHistoryDrawer.jsx';
 import { Drawer, Modal } from "@mantine/core";
 import { useReducedMotion } from "@mantine/hooks";
 import { Button, Input } from "./components/AppUI.jsx";
@@ -140,28 +124,11 @@ export default function App() {
   const [requestLogs, setRequestLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [managementOpen, setManagementOpen] = useState(false);
-  const [globalHistoryOpen, setGlobalHistoryOpen] = useState(false);
-  const [globalHistoryQuery, setGlobalHistoryQuery] = useState("");
-  const [globalHistoryFilters, setGlobalHistoryFilters] = useState({
-    profileId: "",
-    mode: "",
-    model: "",
-    savedOnly: false,
-  });
-  const [historyState, setHistoryState] = useState(createEmptyOutputHistory());
-  const [activeSessionId, setActiveSessionId] = useState(null);
-  const [forceNewSession, setForceNewSession] = useState(false);
-  const [activeHistoryEntryId, setActiveHistoryEntryId] = useState(null);
-  const [selectedHistoryPreviewEntryId, setSelectedHistoryPreviewEntryId] = useState(null);
-  const [selectedGlobalHistoryEntryId, setSelectedGlobalHistoryEntryId] = useState(null);
   const inputTextRef = useRef(inputText);
 
   // Modals / dropdowns
   const [styleModalOpen, setStyleModalOpen]   = useState(false);
   const backupSyncReadyRef = useRef(false);
-  const historyStateRef = useRef(createEmptyOutputHistory());
-  const activeSessionIdRef = useRef(null);
-  const forceNewSessionRef = useRef(false);
 
   // Backup status
   const [backupStatus, setBackupStatus]         = useState("idle");
@@ -205,27 +172,6 @@ export default function App() {
   const prefersReducedMotion = useReducedMotion();
   const isTestEnv = import.meta.env.MODE === "test";
 
-  useEffect(() => {
-    historyStateRef.current = historyState;
-  }, [historyState]);
-
-  useEffect(() => {
-    activeSessionIdRef.current = activeSessionId;
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    forceNewSessionRef.current = forceNewSession;
-  }, [forceNewSession]);
-
-  function commitHistoryState(updater) {
-    setHistoryState((prev) => {
-      const draft = typeof updater === "function" ? updater(prev) : updater;
-      const next = pruneUnsavedEntries(draft);
-      historyStateRef.current = next;
-      saveOutputHistory(next);
-      return next;
-    });
-  }
 
   function readComposerTextFromDom() {
     if (typeof document === "undefined") return "";
@@ -292,104 +238,6 @@ export default function App() {
     if (delay) await sleep(PROFILE_STEP_DELAY_MS);
   }
 
-  function buildSessionSeed(sourceText = inputText, currentMode = mode, profileId = activeProfileId) {
-    return {
-      mode: currentMode,
-      sourceTextSnapshot: sourceText,
-      threadKey: buildSessionThreadKey({
-        profileId,
-        mode: currentMode,
-        sourceText,
-      }),
-    };
-  }
-
-  function resolveSubmitSessionId() {
-    if (forceNewSessionRef.current) return null;
-    const currentSessionId = activeSessionIdRef.current;
-    if (currentSessionId && historyStateRef.current.sessionsById[currentSessionId]) {
-      return currentSessionId;
-    }
-    if (!activeHistoryEntryId) return null;
-    const activeEntry = historyStateRef.current.entriesById[activeHistoryEntryId];
-    if (!activeEntry?.sessionId) return null;
-    return historyStateRef.current.sessionsById[activeEntry.sessionId] ? activeEntry.sessionId : null;
-  }
-
-  function buildSessionContextBlock(sessionId, { maxTurns = 6 } = {}) {
-    if (!sessionId) return "";
-    const entries = listSessionEntries(historyStateRef.current, sessionId);
-    if (!entries.length) return "";
-
-    const turns = entries
-      .slice(Math.max(0, entries.length - maxTurns))
-      .map((entry, index) => {
-        const userText = buildHistoryUserText(entry);
-        const modelText = String(entry.baseOutputText || "").trim();
-        const safeUserText = userText || "(empty)";
-        const safeModelText = modelText || "(empty)";
-        return [
-          `Turn ${index + 1} User:`,
-          safeUserText,
-          `Turn ${index + 1} Assistant:`,
-          safeModelText,
-        ].join("\n");
-      });
-
-    if (!turns.length) return "";
-    return [
-      "Session memory:",
-      "Use the following prior turns as context for this same ongoing session, even if generation mode changed.",
-      turns.join("\n\n"),
-    ].join("\n\n");
-  }
-
-  function recordCompletedOutput(nextOutput, { sessionIdOverride = null, regenerateFeedback = "" } = {}) {
-    const presetInstruction = getFormatPresetInstruction(formatPreset);
-    const extraDirection = [presetInstruction, oneOffInstruction.trim()].filter(Boolean).join("\n");
-    const payload = {
-      profileId: activeProfileId,
-      mode,
-      model: selectedModel,
-      sourceText: inputText,
-      extraDirection,
-      regenerateFeedback: String(regenerateFeedback || "").trim(),
-      baseOutputText: nextOutput,
-      currentOutputText: nextOutput,
-      oneOffInstruction,
-      formatPreset,
-      toneLevel,
-      stripCliches,
-      elabDepth,
-      status: "ready",
-      isSaved: false,
-      savedAt: null,
-    };
-    const sessionSeed = buildSessionSeed();
-    const shouldForceCreate = forceNewSessionRef.current && !sessionIdOverride;
-    const { state: withSession, session } = getOrCreateActiveSession(
-      historyStateRef.current,
-      activeProfileId,
-      sessionSeed,
-      sessionIdOverride || activeSessionIdRef.current,
-      { forceCreate: shouldForceCreate }
-    );
-    const { state: appendedState, entry } = appendHistoryEntry(withSession, session.id, payload);
-    const nextState = pruneUnsavedEntries(appendedState);
-
-    historyStateRef.current = nextState;
-    setHistoryState(nextState);
-    saveOutputHistory(nextState);
-    activeSessionIdRef.current = session.id;
-    setActiveSessionId(session.id);
-    if (forceNewSessionRef.current) {
-      forceNewSessionRef.current = false;
-      setForceNewSession(false);
-    }
-    setActiveHistoryEntryId(entry?.id || null);
-    setSelectedHistoryPreviewEntryId(entry?.id || null);
-    setSelectedGlobalHistoryEntryId(entry?.id || null);
-  }
 
   // Load persisted data
   useEffect(() => {
@@ -412,7 +260,6 @@ export default function App() {
           load("cliches-v3"),
           load("cliches-ts-v3"),
           load(`${WRITER_DRAFT_KEY}:${PROFILE_OPTIONS[0].id}`),
-          loadOutputHistory(),
           load(RUNTIME_API_CONFIG_KEY),
           load(MODEL_PREF_KEY),
           load(CUSTOM_MODELS_KEY),
@@ -457,8 +304,6 @@ export default function App() {
         if (storedCliches) setCliches(storedCliches);
         if (storedTs)      setClichesUpdatedAt(new Date(storedTs));
         if (typeof storedWriterDraft === "string") setInputText(storedWriterDraft);
-        setHistoryState(storedOutputHistory);
-        historyStateRef.current = storedOutputHistory;
         const validCustomModels = Array.isArray(storedCustomModels)
           ? storedCustomModels
             .filter((item) => item && typeof item.value === "string" && item.value.trim())
@@ -588,17 +433,6 @@ export default function App() {
       setInputText(typeof draft === "string" ? draft : "");
     });
   }, [activeProfileId]);
-  useEffect(() => {
-    if (outputPhase !== "ready" || !activeHistoryEntryId) return;
-    const entry = historyStateRef.current.entriesById[activeHistoryEntryId];
-    if (!entry || entry.currentOutputText === outputText) return;
-    const timer = setTimeout(() => {
-      commitHistoryState((prev) => updateHistoryEntry(prev, activeHistoryEntryId, {
-        currentOutputText: outputText,
-      }));
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [outputText, outputPhase, activeHistoryEntryId]);
 
   function addCustomModelFromDropdown() {
     setAddModelModalOpen(true);
@@ -721,15 +555,6 @@ export default function App() {
     setStyles(nextStyles);
     await save("styles-v3", nextStyles);
     await saveStylesBackupWithRetry(nextStyles);
-    const nextHistoryState = deleteHistoryEntriesForProfile(historyStateRef.current, activeProfileId);
-    historyStateRef.current = nextHistoryState;
-    setHistoryState(nextHistoryState);
-    await saveOutputHistory(nextHistoryState);
-    activeSessionIdRef.current = null;
-    setActiveSessionId(null);
-    setActiveHistoryEntryId(null);
-    setSelectedHistoryPreviewEntryId(null);
-    setSelectedGlobalHistoryEntryId(null);
 
     clearOutputState();
     setStyleModalOpen(false);
@@ -814,11 +639,6 @@ export default function App() {
     const nextStyles = { ...styles };
     delete nextStyles[activeProfileId];
 
-    const nextHistoryState = deleteHistoryEntriesForProfile(historyStateRef.current, activeProfileId);
-    historyStateRef.current = nextHistoryState;
-    setHistoryState(nextHistoryState);
-    await saveOutputHistory(nextHistoryState);
-
     save(`${WRITER_DRAFT_KEY}:${activeProfileId}`, null);
     setCustomProfiles(nextCustomProfiles);
     setStyles(nextStyles);
@@ -827,11 +647,6 @@ export default function App() {
 
     const fallbackId = nextCustomProfiles[0]?.id || PROFILE_OPTIONS[0].id;
     setActiveProfileId(fallbackId);
-    activeSessionIdRef.current = null;
-    setActiveSessionId(null);
-    setActiveHistoryEntryId(null);
-    setSelectedHistoryPreviewEntryId(null);
-    setSelectedGlobalHistoryEntryId(null);
     clearOutputState();
     setStatus(`"${profileName}" profile deleted.`);
     setTimeout(() => setStatus(""), 1500);
@@ -911,18 +726,6 @@ export default function App() {
       setRequestLogs([]);
       setLogsLoading(false);
       setManagementOpen(false);
-      setGlobalHistoryOpen(false);
-      setGlobalHistoryQuery("");
-      setGlobalHistoryFilters({ profileId: "", mode: "", model: "", savedOnly: false });
-      setHistoryState(createEmptyOutputHistory());
-      historyStateRef.current = createEmptyOutputHistory();
-      activeSessionIdRef.current = null;
-      setActiveSessionId(null);
-      forceNewSessionRef.current = false;
-      setForceNewSession(false);
-      setActiveHistoryEntryId(null);
-      setSelectedHistoryPreviewEntryId(null);
-      setSelectedGlobalHistoryEntryId(null);
       setStyleModalOpen(true);
       setBackupStatus("idle");
       setBackupLastSavedAt(null);
@@ -1140,8 +943,6 @@ export default function App() {
     setOutputCopied(false);
     setShowDiff(true);
     setOutputPhase("idle");
-    setActiveHistoryEntryId(null);
-    setSelectedHistoryPreviewEntryId(null);
   }
 
   function startOutputStream() {
@@ -1150,18 +951,15 @@ export default function App() {
     setOutputCopied(false);
     setShowDiff(true);
     setOutputPhase("streaming");
-    setActiveHistoryEntryId(null);
-    setSelectedHistoryPreviewEntryId(null);
   }
 
-  function commitOutput(nextOutput, { sessionIdOverride = null, regenerateFeedback = "" } = {}) {
+  function commitOutput(nextOutput) {
     const normalized = String(nextOutput || "");
     setOutputText(normalized);
     setOutputBaseline(normalized);
     setOutputCopied(false);
     setShowDiff(true);
     setOutputPhase("ready");
-    recordCompletedOutput(normalized, { sessionIdOverride, regenerateFeedback });
   }
 
   function handleOutputChange(nextOutput) {
@@ -1240,44 +1038,9 @@ export default function App() {
     }
   }
 
-  function openGlobalHistory() {
-    setGlobalHistoryQuery("");
-    setGlobalHistoryFilters({
-      profileId: "",
-      mode: "",
-      model: "",
-      savedOnly: false,
-    });
-    setGlobalHistoryOpen(true);
-  }
-
-  function copySessionHistoryPart(entryId, part) {
-    const entry = historyStateRef.current.entriesById[entryId];
-    if (!entry) return;
-    const text = part === "user" ? buildHistoryUserText(entry) : entry.baseOutputText;
-    if (!String(text || "").trim()) return;
-    copyTextToClipboard(text, part === "user" ? "User text copied." : "Model text copied.");
-  }
-
-  function removeHistoryEntry(entry) {
-    if (!entry) return;
-
-    const visibleEntryIds = globalHistoryEntries.map((item) => item.id);
-    const currentIndex = visibleEntryIds.indexOf(entry.id);
-    const nextSelectedEntryId = currentIndex > 0
-      ? visibleEntryIds[currentIndex - 1]
-      : visibleEntryIds[1] || null;
-
-    setSelectedGlobalHistoryEntryId(nextSelectedEntryId);
-    commitHistoryState((prev) => deleteHistoryEntry(prev, entry.id));
-    if (selectedHistoryPreviewEntryId === entry.id) setSelectedHistoryPreviewEntryId(null);
-    if (activeHistoryEntryId === entry.id) setActiveHistoryEntryId(null);
-  }
-
   // ── Humanize ──
   async function humanize({ regenerateFeedback = "" } = {}) {
     const sourceText = resolveSourceText();
-    const sessionIdOverride = resolveSubmitSessionId();
     const activeProfile = styles[activeProfileId];
     if (!activeProfile) { setError("Onboard your writing profile first."); return; }
     if (sourceText.trim().length < 20) { setError("Paste some text to humanize (20+ chars)."); return; }
@@ -1296,8 +1059,7 @@ export default function App() {
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
         : "";
-      const sessionContextBlock = buildSessionContextBlock(sessionIdOverride);
-      const baseSystemPrompt = [basePrompt, sessionContextBlock, feedbackPrompt].filter(Boolean).join("\n\n");
+      const baseSystemPrompt = [basePrompt, feedbackPrompt].filter(Boolean).join("\n\n");
       const humanizeOptions = { temperature: TEMP_BY_TONE[toneLevel] ?? 0.9, frequency_penalty: 0.15 };
       const streamRewrite = async (systemPrompt, userPrompt, firstChunkMessage) => {
         startOutputStream();
@@ -1345,7 +1107,7 @@ export default function App() {
         }
         throw new Error("The model returned an empty response.");
       }
-      commitOutput(out, { sessionIdOverride, regenerateFeedback });
+      commitOutput(out);
       pushProcessStep("Rewrite completed successfully.", "success", `${countWords(out)} words generated`);
       completeProcess("Rewrite completed successfully.");
       setStatus("");
@@ -1366,7 +1128,6 @@ export default function App() {
   // ── Elaborate ──
   async function elaborate({ regenerateFeedback = "" } = {}) {
     const sourceText = resolveSourceText();
-    const sessionIdOverride = resolveSubmitSessionId();
     const activeProfile = styles[activeProfileId];
     if (!activeProfile) { setError("Onboard your writing profile first."); return; }
     if (sourceText.trim().length < 10) { setError("Write something to elaborate on."); return; }
@@ -1377,18 +1138,17 @@ export default function App() {
       if (!(await ensureApiKeyReady("expanding text"))) return;
       const confidence = activeProfileConfidence;
       const filteredProfile = filterProfileForContext(activeProfile.profile, { toneLevel, formatPreset, mode, confidence });
-      const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
+      const { message: filterMsg, detail: filterDetail = "" } = describeProfileFilter(activeProfile.profile, filteredProfile);
       pushProcessStep(filterMsg, "info", filterDetail);
       startOutputStream();
       pushProcessStep("Preparing prompt and opening model stream.");
       let loggedFirstChunk = false;
       const basePrompt = applyPromptDecorators(ELABORATE_SYS(filteredProfile, toneLevel, elabDepth, activeProfile.name, activeProfile.meta));
-      const sessionContextBlock = buildSessionContextBlock(sessionIdOverride);
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
         : "";
       const out = await llmStream(
-        [basePrompt, sessionContextBlock, feedbackPrompt].filter(Boolean).join("\n\n"),
+        [basePrompt, feedbackPrompt].filter(Boolean).join("\n\n"),
         `Elaborate on:\n\n${sourceText}`,
         (_, full) => {
           if (!loggedFirstChunk) {
@@ -1414,7 +1174,7 @@ export default function App() {
         }
         throw new Error("The model returned an empty response.");
       }
-      commitOutput(out, { sessionIdOverride, regenerateFeedback });
+      commitOutput(out);
       pushProcessStep("Expansion completed successfully.", "success", `${countWords(out)} words generated`);
       completeProcess("Expansion completed successfully.");
       setStatus("");
@@ -1432,42 +1192,6 @@ export default function App() {
     finally { setRequestLoading(false); setLoading(false); }
   }
 
-  const activeSession = activeSessionId ? historyState.sessionsById[activeSessionId] || null : null;
-  const sessionEntries = activeSession && activeSession.profileId === activeProfileId
-    ? listSessionEntries(historyState, activeSessionId)
-    : [];
-  const globalHistoryEntries = searchHistoryEntries(historyState, globalHistoryQuery, globalHistoryFilters);
-  const selectedGlobalHistoryEntry = selectedGlobalHistoryEntryId
-    ? globalHistoryEntries.find((entry) => entry.id === selectedGlobalHistoryEntryId) || null
-    : globalHistoryEntries[0] || null;
-  const historyProfileOptions = PROFILE_OPTIONS.map((profile) => ({
-    value: profile.id,
-    label: profile.label,
-  }));
-  const historyModelOptions = modelOptions.map((model) => ({
-    value: model.value,
-    label: model.label,
-  }));
-
-  useEffect(() => {
-    if (!globalHistoryEntries.length) {
-      setSelectedGlobalHistoryEntryId(null);
-      return;
-    }
-    if (!selectedGlobalHistoryEntryId || !globalHistoryEntries.some((entry) => entry.id === selectedGlobalHistoryEntryId)) {
-      setSelectedGlobalHistoryEntryId(globalHistoryEntries[0].id);
-    }
-  }, [globalHistoryEntries, selectedGlobalHistoryEntryId]);
-
-  useEffect(() => {
-    if (!sessionEntries.length) {
-      setSelectedHistoryPreviewEntryId(null);
-      return;
-    }
-    if (!selectedHistoryPreviewEntryId || !sessionEntries.some((entry) => entry.id === selectedHistoryPreviewEntryId)) {
-      setSelectedHistoryPreviewEntryId(sessionEntries[sessionEntries.length - 1].id);
-    }
-  }, [sessionEntries, selectedHistoryPreviewEntryId]);
 
   const activeProfile = styles[activeProfileId] || null;
   const hasProfile = hasTrainedProfile(activeProfile);
@@ -1484,11 +1208,6 @@ export default function App() {
     inputTextRef.current = "";
     setInputText("");
     clearOutputState();
-    activeSessionIdRef.current = null;
-    setActiveSessionId(null);
-    setSelectedGlobalHistoryEntryId(null);
-    forceNewSessionRef.current = true;
-    setForceNewSession(true);
   };
 
   const handleModeChange = (m) => {
@@ -1513,8 +1232,7 @@ export default function App() {
 
   const hasCompletedOutput = outputPhase === "ready" && outputText.trim().length > 0;
   const isStreamingOutput = outputPhase === "streaming";
-  const hasSessionHistory = sessionEntries.length > 0;
-  const shouldShowOutputPanel = isStreamingOutput || hasCompletedOutput || hasSessionHistory;
+  const shouldShowOutputPanel = isStreamingOutput || hasCompletedOutput;
   const outputEdited = hasCompletedOutput && outputText !== outputBaseline;
   const metricSnapshotBefore = computeTextMetricSnapshot(inputText);
   const metricSnapshotAfter = computeTextMetricSnapshot(outputText);
@@ -1627,10 +1345,6 @@ export default function App() {
                   onCopy={copyOutput}
                   onRegenerate={regenerateOutput}
                   onRegenerateWithFeedback={regenerateOutputWithFeedback}
-                  sessionEntries={sessionEntries}
-                  selectedHistoryPreviewEntryId={selectedHistoryPreviewEntryId}
-                  onSelectHistoryPreview={setSelectedHistoryPreviewEntryId}
-                  onCopySessionHistoryPart={copySessionHistoryPart}
                   cliches={cliches}
                   onPartialRegen={regeneratePartial}
                   isPartialStreaming={isPartialStreaming}
@@ -1640,22 +1354,6 @@ export default function App() {
           </div>
         </section>
       </main>
-
-      <Button
-        className="history-fab"
-        color={globalHistoryOpen ? "primary" : "default"}
-        variant={globalHistoryOpen ? "solid" : "bordered"}
-        onPress={openGlobalHistory}
-        aria-label="Open output history"
-        tooltip="Open the full response archive"
-        iconOnly
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M3 12a9 9 0 1 0 3-6.7" />
-          <path d="M3 4v5h5" />
-          <path d="M12 7v5l3 2" />
-        </svg>
-      </Button>
 
       <Button
         className="logs-fab"
@@ -1672,36 +1370,6 @@ export default function App() {
           <circle cx="12" cy="19" r="2" />
         </svg>
       </Button>
-
-      <Drawer
-        opened={globalHistoryOpen}
-        onClose={() => setGlobalHistoryOpen(false)}
-        position="left"
-        size={860}
-        offset={20}
-        zIndex={395}
-        title={<strong className="drawer-title">Output History</strong>}
-        classNames={{
-          content: "settings-drawer output-history-drawer",
-          header: "editor-settings-drawer-header",
-          body: "panel-grid editor-settings-drawer-body",
-        }}
-        overlayProps={{ backgroundOpacity: 0.16, blur: 4 }}
-        transitionProps={{ ...drawerTransitionProps, transition: "slide-right" }}
-      >
-        <OutputHistoryDrawer
-          entries={globalHistoryEntries}
-          selectedEntry={selectedGlobalHistoryEntry}
-          query={globalHistoryQuery}
-          onQueryChange={setGlobalHistoryQuery}
-          filters={globalHistoryFilters}
-          onFilterChange={(patch) => setGlobalHistoryFilters((prev) => ({ ...prev, ...patch }))}
-          profileOptions={historyProfileOptions}
-          modelOptions={historyModelOptions}
-          onSelectEntry={setSelectedGlobalHistoryEntryId}
-          onDeleteEntry={removeHistoryEntry}
-        />
-      </Drawer>
 
       <Drawer
         opened={logsOpen}
