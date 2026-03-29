@@ -57,3 +57,9 @@
 2026-03-29T14:26:18.893574+00:00 openrouter_chat completed model=anthropic/claude-sonnet-4-6 chars=38 usage_present=true
 2026-03-29T14:41:15.992306+00:00 openrouter_chat start model=anthropic/claude-sonnet-4-6 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=2648
 2026-03-29T14:41:19.692231+00:00 openrouter_chat completed model=anthropic/claude-sonnet-4-6 chars=41 usage_present=true
+2026-03-29T15:30:51.701832+00:00 openrouter_chat_stream start request_id=1774798250962-couvyio7 model=anthropic/claude-sonnet-4-6 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=3230
+2026-03-29T15:30:55.276581+00:00 openrouter_chat_stream done_marker request_id=1774798250962-couvyio7 model=anthropic/claude-sonnet-4-6
+2026-03-29T15:30:55.277201+00:00 openrouter_chat_stream completed request_id=1774798250962-couvyio7 model=anthropic/claude-sonnet-4-6 chars=669 events=56 chunks=53 parse_errors=0
+2026-03-29T15:33:28.451112+00:00 openrouter_chat_stream start request_id=1774798408354-lghxt4vl model=anthropic/claude-sonnet-4-6 url=https://openrouter.ai/api/v1/chat/completions message_count=2 system_len=2646
+2026-03-29T15:33:30.173777+00:00 openrouter_chat_stream done_marker request_id=1774798408354-lghxt4vl model=anthropic/claude-sonnet-4-6
+2026-03-29T15:33:30.174673+00:00 openrouter_chat_stream completed request_id=1774798408354-lghxt4vl model=anthropic/claude-sonnet-4-6 chars=95 events=11 chunks=8 parse_errors=0

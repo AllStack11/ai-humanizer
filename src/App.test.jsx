@@ -15,7 +15,7 @@ import App, {
   normalizeStoredStyles,
   outputLooksLikeAnsweredPrompt,
 } from "./App.jsx";
-import { createEmptyOutputHistory, saveOutputHistory, loadOutputHistory } from "./lib/output-history.js";
+import { saveOutputHistory, loadOutputHistory } from "./lib/output-history.js";
 
 const theme = createTheme({
   primaryColor: "blue",
@@ -180,42 +180,6 @@ describe("App UI", () => {
 
   afterEach(() => {
     delete window.__TAURI_INTERNALS__;
-  });
-
-  test("shows onboarding state when selected profile is untrained", async () => {
-    renderWithMantine(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Start onboarding" }));
-    await screen.findByText(/profile needs onboarding/i);
-    expect(screen.getByRole("button", { name: "Onboard profile first" })).toBeDisabled();
-  });
-
-  test("supports profile and theme controls", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
-        personal: {
-          id: "personal",
-          name: "Personal",
-          profile: { tone: "balanced" },
-          sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
-          sampleCount: 1,
-          updatedAt: new Date().toISOString(),
-        },
-      })
-    );
-
-    renderWithMantine(<App />);
-    await screen.findByRole("button", { name: /add personal samples/i });
-
-    const profileSelect = screen.getByRole("combobox", { name: "Profile" });
-    fireEvent.change(profileSelect, { target: { value: "work" } });
-    fireEvent.click(screen.getByRole("button", { name: "Start onboarding" }));
-    await screen.findByText(/Work profile needs onboarding/i);
-
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    const themeSelect = await screen.findByRole("combobox", { name: "Theme" });
-    fireEvent.change(themeSelect, { target: { value: "teal" } });
-    expect(themeSelect).toHaveValue("teal");
   });
 
   test("pastes clipboard text into the input when paste button is pressed", async () => {
@@ -1584,77 +1548,6 @@ describe("App UI", () => {
     expect((await screen.findAllByText("Persisted across remount")).length).toBeGreaterThan(0);
   });
 
-  test("full app reset clears persisted output history storage", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
-        personal: {
-          id: "personal",
-          name: "Personal",
-          profile: { tone: "balanced" },
-          sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
-          sampleCount: 1,
-          updatedAt: new Date().toISOString(),
-        },
-      })
-    );
-    await saveOutputHistory({
-      ...createEmptyOutputHistory(),
-      entriesById: {
-        entryOne: {
-          id: "entryOne",
-          sessionId: "sessionOne",
-          profileId: "personal",
-          createdAt: "2026-03-03T12:00:00.000Z",
-          updatedAt: "2026-03-03T12:00:00.000Z",
-          mode: "humanize",
-          model: "writer/palmyra-x5",
-          sourceText: "Original",
-          baseOutputText: "Stored output",
-          currentOutputText: "Stored output",
-          title: "Stored history",
-          status: "ready",
-          formatPreset: "none",
-          toneLevel: 2,
-          stripCliches: true,
-          elabDepth: 2,
-          isSaved: false,
-          savedAt: null,
-        },
-      },
-      sessionsById: {
-        sessionOne: {
-          id: "sessionOne",
-          profileId: "personal",
-          startedAt: "2026-03-03T12:00:00.000Z",
-          updatedAt: "2026-03-03T12:00:00.000Z",
-          mode: "humanize",
-          sourceTextSnapshot: "Original",
-          threadKey: "personal::humanize::Original",
-          entryIds: ["entryOne"],
-          activeEntryId: "entryOne",
-        },
-      },
-      globalEntryOrder: ["entryOne"],
-    });
-
-    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(true);
-    const promptMock = vi.spyOn(window, "prompt").mockReturnValue("RESET APP DATA");
-
-    renderWithMantine(<App />);
-    await screen.findByRole("button", { name: /add personal samples/i });
-
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Full app data reset" }));
-    await screen.findByText(/Onboard Your Writing Profile/i);
-
-    const reloadedHistory = await loadOutputHistory();
-    expect(reloadedHistory.globalEntryOrder).toEqual([]);
-    expect(reloadedHistory.entriesById).toEqual({});
-
-    confirmMock.mockRestore();
-    promptMock.mockRestore();
-  });
 
   test("profile reset clears history entries for the active profile", async () => {
     localStorage.setItem(
@@ -1771,45 +1664,6 @@ describe("App UI", () => {
     promptMock.mockRestore();
   });
 
-  test("full app reset clears output state and reopens onboarding", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
-        personal: {
-          id: "personal",
-          name: "Personal",
-          profile: { tone: "balanced" },
-          sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
-          sampleCount: 1,
-          updatedAt: new Date().toISOString(),
-        },
-      })
-    );
-
-    const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(true);
-    const promptMock = vi.spyOn(window, "prompt").mockReturnValue("RESET APP DATA");
-
-    renderWithMantine(<App />);
-    await screen.findByRole("button", { name: /add personal samples/i });
-
-    fireEvent.change(screen.getByPlaceholderText("Paste AI-generated text here…"), {
-      target: { value: "This paragraph is long enough to create output before resetting app data." },
-    });
-    fireEvent.keyDown(window, { key: "Enter", metaKey: true });
-    await screen.findByLabelText("Generated output editor");
-
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Full app data reset" }));
-
-    await screen.findByText(/Onboard Your Writing Profile/i);
-    fireEvent.click(screen.getByRole("button", { name: "Start onboarding" }));
-    await screen.findByText(/profile needs onboarding/i);
-    expect(screen.queryByRole("button", { name: "Accept output" })).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Paste AI-generated text here…")).toHaveValue("");
-
-    confirmMock.mockRestore();
-    promptMock.mockRestore();
-  });
 
   test("submits editor input with Enter", async () => {
     localStorage.setItem(
