@@ -144,7 +144,7 @@ export default function StyleModal({ profileId, hasProfile, loading, health, pro
   }
 
   return (
-    <Modal opened onClose={onClose} centered size="xl" classNames={{ content: "modal-content", body: "panel-grid" }} withCloseButton={false}>
+    <Modal opened onClose={onClose} centered size="1000px" classNames={{ content: "modal-content", body: "panel-grid" }} withCloseButton={false}>
         <div className="toolbar-row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
           <h2 style={{ margin: 0 }}>{hasProfile ? "Grow Your Writing Profile" : "Onboard Your Writing Profile"}</h2>
           <Button

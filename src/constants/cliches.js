@@ -13,4 +13,14 @@ export const BASE_CLICHES = [
   "it's no secret that","the bottom line","moving forward"
 ];
 
+// Tier-1 clichés: highest-signal AI fingerprints — always appear first in the constraint
+// regardless of LLM refresh order, so the model always sees the most diagnostic prohibitions
+export const TIER1_CLICHES = new Set([
+  "delve", "certainly", "I'd be happy to", "it's worth noting",
+  "in today's fast-paced world", "game-changer", "leverage", "dive deep",
+  "comprehensive", "robust", "streamline", "cutting-edge", "revolutionary",
+  "transformative", "navigating", "landscape", "paradigm", "synergy",
+  "unlock potential", "harness", "empower", "foster", "pivotal",
+]);
+
 export const CLICHE_PROMPT = `List the most current overused AI writing clichés and buzzwords that make text sound AI-generated in ${new Date().getFullYear()}. Return ONLY a JSON array of strings, no markdown, no explanation. At least 60 terms.`;

@@ -1358,6 +1358,48 @@ button {
   border-radius: 4px;
 }
 
+/* TipTap display editor layout */
+.output-display-editor-wrap {
+  width: 100%;
+}
+
+.output-display-editor-wrap .ProseMirror {
+  outline: none;
+  caret-color: transparent;
+}
+
+/* Live cursor selection: grey by default, green once ≥6 words are selected */
+.output-display-editor-wrap .ProseMirror ::selection {
+  background: rgba(140, 140, 140, 0.3);
+  color: inherit;
+}
+
+.output-display-editor-wrap.has-valid-selection .ProseMirror ::selection {
+  background: color-mix(in srgb, var(--accent) 36%, transparent);
+  color: inherit;
+}
+
+/* Locked selection highlight (post-dismiss, before regen starts) */
+.mark-selection-active {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 3px;
+  outline: 1.5px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: 1px;
+}
+
+.mark-regen-pending {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 3px;
+  outline: 1.5px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+  animation: regenPendingPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes regenPendingPulse {
+  0%, 100% { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  50%       { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+}
+
 .editor-textarea {
   position: relative;
   width: 100%;
@@ -2065,6 +2107,78 @@ button {
 
 .output-stream-copy {
   margin: 0;
+}
+
+/* ── Selection Regenerate Tooltip ─────────────────────────────────── */
+.output-regen-zone {
+  position: relative;
+}
+
+.selection-regen-tooltip {
+  position: absolute;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--app-border) 78%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--field-surface-top) 72%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 20px rgba(18, 35, 24, 0.18);
+  pointer-events: auto;
+  transform: translate(4px, 6px);
+  animation: regenTooltipIn 140ms var(--motion-bounce) both;
+}
+
+@keyframes regenTooltipIn {
+  from { opacity: 0; transform: translate(4px, 2px) scale(0.94); }
+  to   { opacity: 1; transform: translate(4px, 6px) scale(1); }
+}
+
+.selection-regen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--editor-font);
+  font-weight: 600;
+  color: color-mix(in srgb, var(--app-text) 80%, var(--accent) 20%);
+  line-height: 1;
+  transition: color var(--motion-fast) ease;
+}
+
+.selection-regen-btn:hover {
+  color: var(--accent);
+}
+
+.selection-regen-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--app-muted);
+  opacity: 0.6;
+  transition: opacity var(--motion-fast) ease;
+}
+
+.selection-regen-dismiss:hover {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .selection-regen-tooltip {
+    animation: none;
+  }
 }
 
 .output-stream-box {

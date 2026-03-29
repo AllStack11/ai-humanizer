@@ -7,6 +7,8 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { Button, Card, Spinner } from "./AppUI.jsx";
 import SessionHistoryPanel from "./SessionHistoryPanel.jsx";
 import { renderMarkdownToHtml } from "../utils/markdown.js";
+import { DynamicHighlighter, SelectionAwareHighlighter } from "../lib/tiptap-highlighter.js";
+import { buildClicheRanges } from "../utils/diff.js";
 
 const EDITOR_BLOCK_SEPARATOR = "\n\n";
 const OUTPUT_EDITOR_KEYS_EXTENSION = Extension.create({
@@ -40,7 +42,176 @@ function getEditorText(editor) {
   return editor.getText({ blockSeparator: EDITOR_BLOCK_SEPARATOR });
 }
 
-function OutputEditor({ value, onChange, isEditable = true, placeholder = "Refine the rewrite before accepting it…" }) {
+function resolveRawIndices(rawText, selectedText) {
+  if (!selectedText || !rawText) return { start: -1, end: -1 };
+  // Strategy 1: direct substring match
+  const idx = rawText.indexOf(selectedText);
+  if (idx !== -1) return { start: idx, end: idx + selectedText.length };
+  // Strategy 2: strip markdown syntax chars, search, then map back
+  const MD = new Set(["*", "_", "`", "~", "#", ">", "[", "]", "(", ")"]);
+  const ismd = (ch) => MD.has(ch);
+  const stripped = [...rawText].filter((ch) => !ismd(ch)).join("");
+  const si = stripped.indexOf(selectedText);
+  if (si === -1) return { start: -1, end: -1 };
+  // Map stripped index → raw index
+  let raw = 0, s = 0;
+  for (let i = 0; i < rawText.length; i++) {
+    if (!ismd(rawText[i])) {
+      if (s === si) { raw = i; break; }
+      s++;
+    }
+  }
+  // Count raw chars needed to cover selectedText.length non-syntax chars
+  const afterRaw = rawText.slice(raw);
+  let rlen = 0, mlen = 0;
+  for (let i = 0; i < afterRaw.length; i++) {
+    if (!ismd(afterRaw[i])) mlen++;
+    rlen++;
+    if (mlen >= selectedText.length) break;
+  }
+  return { start: raw, end: raw + rlen };
+}
+
+// Read-only TipTap display editor with full markdown rendering, cliché highlighting,
+// and selection-aware highlight decorations.
+function OutputDisplayEditor({ outputText, cliches, lockedHighlight, isPartialStreaming, onSelectionReady, onSelectionClear, containerRef }) {
+  const wrapperRef = useRef(null);
+
+  const editor = useEditor({
+    editable: true, // keep editable so TipTap tracks selection state
+    immediatelyRender: true,
+    shouldRerenderOnTransaction: false,
+    extensions: [
+      StarterKit,
+      DynamicHighlighter.configure({
+        getRanges: (text) => {
+          if (!text) return [];
+          return buildClicheRanges(text, cliches).map((r) => ({ start: r.start, end: r.end, kind: "cliche" }));
+        },
+      }),
+      SelectionAwareHighlighter,
+    ],
+    content: renderMarkdownToHtml(outputText),
+    editorProps: {
+      // Block all input so the editor is visually read-only
+      handleDOMEvents: {
+        beforeinput: () => true,
+        paste: () => true,
+        drop: () => true,
+      },
+      attributes: { class: "output-display-tiptap", spellcheck: "false" },
+    },
+  });
+
+  // Update content when outputText changes
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.commands.setContent(renderMarkdownToHtml(outputText || ""), false);
+  }, [editor, outputText]);
+
+  // Refresh cliché decorations when cliches list changes
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.view.dispatch(editor.state.tr.setMeta("dynamicHighlighterUpdate", true));
+  }, [editor, cliches]);
+
+  // Drive the selection-lock decoration from props
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    if (lockedHighlight) {
+      const className = isPartialStreaming ? "mark-regen-pending" : "mark-selection-active";
+      editor.view.dispatch(
+        editor.state.tr.setMeta("selectionLock", { from: lockedHighlight.from, to: lockedHighlight.to, className })
+      );
+    } else {
+      editor.view.dispatch(
+        editor.state.tr.setMeta("selectionLock", { from: 0, to: 0, className: "" })
+      );
+    }
+  }, [editor, lockedHighlight, isPartialStreaming]);
+
+  // Live selection → CSS class on wrapper only (no React state → no re-render → selection never disrupted)
+  useEffect(() => {
+    if (!editor) return;
+    function onSelectionUpdate({ editor: ed }) {
+      const { from, to } = ed.state.selection;
+      if (from === to) { wrapperRef.current?.classList.remove("has-valid-selection"); return; }
+      const words = ed.state.doc.textBetween(from, to, " ").trim().split(/\s+/).filter(Boolean).length;
+      wrapperRef.current?.classList.toggle("has-valid-selection", words >= 6);
+    }
+    editor.on("selectionUpdate", onSelectionUpdate);
+    return () => editor.off("selectionUpdate", onSelectionUpdate);
+  }, [editor]);
+
+  // Tooltip on pointer release (single state update, after selection is final)
+  useEffect(() => {
+    if (!editor) return;
+    function onPointerUp() {
+      if (isPartialStreaming) return;
+      const { from, to } = editor.state.selection;
+      if (from === to) { onSelectionClear(); return; }
+      // Verify selection is inside this editor
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { onSelectionClear(); return; }
+      if (!editor.view.dom.contains(sel.getRangeAt(0).commonAncestorContainer)) { onSelectionClear(); return; }
+      const selText = editor.state.doc.textBetween(from, to, " ").trim();
+      const words = selText.split(/\s+/).filter(Boolean).length;
+      if (words < 6) { onSelectionClear(); return; }
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      const containerRect = containerRef.current?.getBoundingClientRect();
+      if (!containerRect) return;
+      onSelectionReady({ text: selText, from, to, x: rect.right - containerRect.left, y: rect.bottom - containerRect.top });
+    }
+    document.addEventListener("pointerup", onPointerUp);
+    return () => document.removeEventListener("pointerup", onPointerUp);
+  }, [editor, isPartialStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div ref={wrapperRef} className="output-display-editor-wrap">
+      <EditorContent editor={editor} />
+    </div>
+  );
+}
+
+function SelectionRegenTooltip({ tooltip, isLoading, onRegenerate, onDismiss }) {
+  if (!tooltip) return null;
+  return (
+    <div
+      className="selection-regen-tooltip"
+      style={{ left: tooltip.x, top: tooltip.y }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onPointerUp={(e) => e.stopPropagation()}
+    >
+      {isLoading ? (
+        <Spinner size="xs" />
+      ) : (
+        <button
+          className="selection-regen-btn"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onRegenerate}
+        >
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M21 2v6h-6"/>
+            <path d="M3 22v-6h6"/>
+            <path d="M3.51 9a9 9 0 0 1 14.13-3.36L21 8"/>
+            <path d="M20.49 15a9 9 0 0 1-14.13 3.36L3 16"/>
+          </svg>
+          Regenerate
+        </button>
+      )}
+      {!isLoading && (
+        <button className="selection-regen-dismiss" onClick={onDismiss} aria-label="Dismiss">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18"/>
+            <path d="m6 6 12 12"/>
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+function OutputEditor({ value, onChange, isEditable = true, placeholder = "Refine the rewrite before accepting it…", cliches = [] }) {
   const editor = useEditor({
     immediatelyRender: true,
     shouldRerenderOnTransaction: false,
@@ -59,6 +230,16 @@ function OutputEditor({ value, onChange, isEditable = true, placeholder = "Refin
         placeholder,
       }),
       OUTPUT_EDITOR_KEYS_EXTENSION,
+      DynamicHighlighter.configure({
+        getRanges: (text) => {
+          if (!text) return [];
+          return buildClicheRanges(text, cliches).map((range) => ({
+            start: range.start,
+            end: range.end,
+            kind: "cliche",
+          }));
+        },
+      }),
     ],
     content: buildEditorHtml(value),
     onUpdate: ({ editor }) => {
@@ -93,6 +274,11 @@ function OutputEditor({ value, onChange, isEditable = true, placeholder = "Refin
       } catch {}
     }
   }, [editor, value]);
+
+  useEffect(() => {
+    if (!editor) return;
+    editor.view.dispatch(editor.state.tr.setMeta("dynamicHighlighterUpdate", true));
+  }, [editor, value, cliches]);
 
   return <EditorContent editor={editor} className="output-editor-content" />;
 }
@@ -378,11 +564,37 @@ export default function OutputPanel({
   selectedHistoryPreviewEntryId = null,
   onSelectHistoryPreview,
   onCopySessionHistoryPart,
+  cliches = [],
+  onPartialRegen,
+  isPartialStreaming = false,
 }) {
-  const markdownHtml = useMemo(() => renderMarkdownToHtml(outputText), [outputText]);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [compareOpen, setCompareOpen] = useState(false);
+  const [tooltip, setTooltip] = useState(null);
+  const [lockedHighlight, setLockedHighlight] = useState(null);
+  const outputZoneRef = useRef(null);
+
+  // Clear the locked highlight decoration once regen finishes
+  useEffect(() => {
+    if (!isPartialStreaming) setLockedHighlight(null);
+  }, [isPartialStreaming]);
+
+  // Clear tooltip (and locked highlight if idle) on any click outside the tooltip
+  useEffect(() => {
+    function onPointerDown() {
+      setTooltip(null);
+      if (!isPartialStreaming) setLockedHighlight(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [isPartialStreaming]);
+
+  // Streaming-only markdown: used only during main generation (no TipTap overhead during stream)
+  const streamingHtml = useMemo(
+    () => (isStreaming && outputText ? renderMarkdownToHtml(outputText) : ""),
+    [isStreaming, outputText]
+  );
   const streamStartMsRef = useRef(0);
   const streamPrevLengthRef = useRef(0);
   const [streamPulse, setStreamPulse] = useState(false);
@@ -439,6 +651,17 @@ export default function OutputPanel({
     onRegenerateWithFeedback?.(feedback);
     setFeedbackOpen(false);
     setFeedbackText("");
+  }
+
+  function handlePartialRegen() {
+    if (!tooltip) return;
+    const { text, from, to } = tooltip;
+    const { start, end } = resolveRawIndices(outputText, text);
+    if (start !== -1) setLockedHighlight({ from, to }); // lock the decoration before clearing native selection
+    window.getSelection()?.removeAllRanges();
+    setTooltip(null);
+    if (start === -1) return;
+    onPartialRegen?.(text, start, end);
   }
 
   return (
@@ -606,21 +829,41 @@ export default function OutputPanel({
                 </Button>
                 </div>
               </div>
-            <div
-              className={`output-stream-box output-markdown-view${isStreaming ? " is-streaming" : ""}${streamPulse ? " output-stream-box--pulse" : ""}`}
-              aria-label="Streaming LLM response"
-              role="region"
-            >
-              {outputText?.trim() ? (
-                <>
-                  <div className="output-markdown-content" dangerouslySetInnerHTML={{ __html: markdownHtml }} />
-                  {isStreaming ? <span className="output-stream-caret" aria-hidden="true" /> : null}
-                </>
-              ) : (
-                <p className="output-markdown-placeholder">
-                  {isStreaming ? "Waiting for model output..." : "Generated response"}
-                </p>
-              )}
+            <div className="output-regen-zone" ref={outputZoneRef}>
+              <div
+                className={`output-stream-box output-markdown-view${isStreaming ? " is-streaming" : ""}${streamPulse ? " output-stream-box--pulse" : ""}`}
+                aria-label="LLM output"
+                role="region"
+              >
+                {outputText?.trim() ? (
+                  isStreaming ? (
+                    <>
+                      <div className="output-markdown-content" dangerouslySetInnerHTML={{ __html: streamingHtml }} />
+                      <span className="output-stream-caret" aria-hidden="true" />
+                    </>
+                  ) : (
+                    <OutputDisplayEditor
+                      outputText={outputText}
+                      cliches={cliches}
+                      lockedHighlight={lockedHighlight}
+                      isPartialStreaming={isPartialStreaming}
+                      onSelectionReady={setTooltip}
+                      onSelectionClear={() => setTooltip(null)}
+                      containerRef={outputZoneRef}
+                    />
+                  )
+                ) : (
+                  <p className="output-markdown-placeholder">
+                    {isStreaming ? "Waiting for model output..." : "Generated response"}
+                  </p>
+                )}
+              </div>
+              <SelectionRegenTooltip
+                tooltip={tooltip}
+                isLoading={isPartialStreaming}
+                onRegenerate={handlePartialRegen}
+                onDismiss={() => setTooltip(null)}
+              />
             </div>
             </div>
           </div>
@@ -638,7 +881,7 @@ export default function OutputPanel({
 
         {!isStreaming ? (
           <div className="output-editor-stealth">
-            <OutputEditor value={outputText} onChange={onOutputChange} />
+            <OutputEditor value={outputText} onChange={onOutputChange} cliches={cliches} />
           </div>
         ) : null}
 

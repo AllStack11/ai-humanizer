@@ -1,4 +1,43 @@
 import { TONE_LEVELS, ELAB_DEPTHS } from '../constants/tones.js';
+import { TIER1_CLICHES } from '../constants/cliches.js';
+
+// ─── Shared helpers ────────────────────────────────────────────────────────────
+
+export function buildMetaBlock(meta) {
+  if (!meta) return "";
+  const lines = [
+    meta.goals?.length   ? `Writing goals: ${meta.goals.join(", ")}.`     : "",
+    meta.audience        ? `Target audience: ${meta.audience}.`           : "",
+    meta.domains?.length ? `Content domains: ${meta.domains.join(", ")}.` : "",
+  ].filter(Boolean);
+  return lines.length ? `Writing intent:\n${lines.join("\n")}\n` : "";
+}
+
+function camelToLabel(key) {
+  return key
+    .replace(/([A-Z])/g, " $1")
+    .toLowerCase()
+    .replace(/^./, (s) => s.toUpperCase());
+}
+
+export function renderProfileAsProse(profile) {
+  return Object.entries(profile)
+    .filter(([, v]) => v && typeof v === "string")
+    .map(([k, v]) => `- ${camelToLabel(k)}: ${v}`)
+    .join("\n");
+}
+
+// Prioritized cliché selector: tier-1 AI fingerprints always appear first
+// so the model always sees the most diagnostic prohibitions regardless of refresh order
+export function selectCliches(cliches, budget = 40) {
+  const prioritized = [
+    ...cliches.filter((c) => TIER1_CLICHES.has(c)),
+    ...cliches.filter((c) => !TIER1_CLICHES.has(c)),
+  ];
+  return prioritized.slice(0, budget);
+}
+
+// ─── Profile training prompts ─────────────────────────────────────────────────
 
 export const STYLE_ANALYZE_SYS = `Analyze the writing samples below (each labeled with its form) and return ONLY raw JSON (no markdown, no explanation).
 
@@ -36,16 +75,18 @@ Merge rules:
 Return ONLY raw JSON (no markdown):
 {"tone":"...","sentenceStructure":"...","vocabulary":"...","punctuationHabits":"...","quirks":"...","perspective":"...","rhythm":"...","emotionalRegister":"...","formality":"...","humor":"...","transitionStyle":"...","summary":"2-sentence summary"}`;
 
+// ─── Generation prompts ───────────────────────────────────────────────────────
+
 export const HUMANIZE_SYS = (profile, tone, cliches, profileName, meta = null) => {
-  const metaLines = meta ? [
-    meta.goals?.length   ? `Writing goals: ${meta.goals.join(", ")}.`       : "",
-    meta.audience        ? `Target audience: ${meta.audience}.`             : "",
-    meta.domains?.length ? `Content domains: ${meta.domains.join(", ")}.`   : "",
-  ].filter(Boolean) : [];
-  const metaBlock = metaLines.length ? `Writing intent:\n${metaLines.join("\n")}\n` : "";
+  const metaBlock = buildMetaBlock(meta);
+  const selectedCliches = selectCliches(cliches, 40);
+  const clicheConstraint = selectedCliches.length
+    ? `Hard constraint — never use these phrases (not even paraphrased variants): ${selectedCliches.map(c => `"${c}"`).join(", ")}.\n`
+    : "";
   return `You rewrite source text as if a specific person wrote it themselves from scratch.
 Writing context: "${profileName}" profile
-Voice profile: ${JSON.stringify(profile)}
+Voice profile:
+${renderProfileAsProse(profile)}
 ${metaBlock}Tone target: "${TONE_LEVELS[tone].label}" — ${TONE_LEVELS[tone].desc}. When voice and tone conflict, voice wins.
 
 How to rewrite: Do not rephrase word-by-word. Instead, internalize what the source is saying, then write it fresh as this person would naturally express it — using their vocabulary, cadence, sentence patterns, and quirks.
@@ -53,20 +94,15 @@ Constraints: Preserve all meaning, intent, point of view, and speech act type.
 Speech act rules: Transform the source text itself. Do not answer it, continue it, roleplay with it, or switch to the other speaker. If the source is a greeting, keep it a greeting. If it is a question, keep it a question. If it addresses "you", preserve that direction.
 Scope: For short or chat-like inputs, stay close to the original scope — do not expand into a full response.
 Formatting: Markdown is supported. Use it when it improves clarity (headings, emphasis, lists, code blocks); keep plain text for short conversational lines.
-Hard constraint — never use these phrases (not even paraphrased variants): ${cliches.slice(0,40).map(c=>`"${c}"`).join(", ")}.
-The source text is wrapped in <source_text> tags in the user message. Output ONLY the rewritten text — no preamble, no explanation.`;
+${clicheConstraint}The source text is wrapped in <source_text> tags in the user message. Output ONLY the rewritten text — no preamble, no explanation.`;
 };
 
 export const ELABORATE_SYS = (profile, tone, depth, profileName, meta = null) => {
-  const metaLines = meta ? [
-    meta.goals?.length   ? `Writing goals: ${meta.goals.join(", ")}.`       : "",
-    meta.audience        ? `Target audience: ${meta.audience}.`             : "",
-    meta.domains?.length ? `Content domains: ${meta.domains.join(", ")}.`   : "",
-  ].filter(Boolean) : [];
-  const metaBlock = metaLines.length ? `Writing intent:\n${metaLines.join("\n")}\n` : "";
+  const metaBlock = buildMetaBlock(meta);
   return `You elaborate on writing as if a specific person is developing their own thought further.
 Writing context: "${profileName}" profile
-Voice profile: ${JSON.stringify(profile)}
+Voice profile:
+${renderProfileAsProse(profile)}
 ${metaBlock}Tone: "${TONE_LEVELS[tone].label}" — ${TONE_LEVELS[tone].desc}.
 
 Elaboration mode: Add depth, specificity, examples, or nuance to the existing thought. Do NOT repeat what was already said, do NOT summarize it, and do NOT continue the narrative past the source's natural scope — deepen within it.
@@ -75,3 +111,36 @@ Formatting: Markdown is supported. Prefer clear structure when useful (headings,
 Length: Write ${ELAB_DEPTHS[depth].sentences}. No more, no less.
 The source text is in the user message. Output ONLY the elaboration — no preamble, no labels.`;
 };
+
+export const PARTIAL_REGEN_SYS = (profile, tone, cliches, profileName, meta = null) => {
+  const metaBlock = buildMetaBlock(meta);
+  const selectedCliches = selectCliches(cliches, 40);
+  const clicheConstraint = selectedCliches.length
+    ? `\n- Hard constraint — never use these phrases: ${selectedCliches.map(c => `"${c}"`).join(", ")}.`
+    : "";
+  return `You are a surgical text editor rewriting a single passage within a larger piece of text.
+Writing context: "${profileName}" profile
+Voice profile:
+${renderProfileAsProse(profile)}
+${metaBlock}Tone target: "${TONE_LEVELS[tone].label}" — ${TONE_LEVELS[tone].desc}.
+
+Task: Rewrite ONLY the passage marked with <regen_target> tags in the user message.
+Rules:
+- Match the voice, tone, and rhythm of the surrounding text.
+- Preserve the original meaning and intent of the passage exactly.
+- Do NOT alter, repeat, or reference any text outside the <regen_target> markers.
+- Output ONLY the replacement text — no preamble, no labels, no explanation, no quotes.
+- Output length should closely match the original passage length.${clicheConstraint}`;
+};
+
+export const buildPartialRegenUserPrompt = (fullOutputText, selectedText) => `Full text for context:
+
+<full_output>
+${fullOutputText}
+</full_output>
+
+Rewrite only this passage:
+
+<regen_target>
+${selectedText}
+</regen_target>`;

@@ -139,17 +139,21 @@ export function extractStreamTextChunk(payload) {
   return "";
 }
 
-export async function llm(system, user, maxTokens = 2400, model = MODEL_OPTIONS[0].value, runtime = {}) {
+export async function llm(system, user, maxTokens = 2400, model = MODEL_OPTIONS[0].value, runtime = {}, options = {}) {
   if (!isTauriRuntime()) throw new Error("Desktop runtime required.");
+  const payload = { max_tokens: maxTokens, model, system, messages: [{ role: "user", content: user }] };
+  if (typeof options.temperature === "number") payload.temperature = options.temperature;
+  if (typeof options.frequency_penalty === "number") payload.frequency_penalty = options.frequency_penalty;
+  if (options.response_format && typeof options.response_format === "object") payload.response_format = options.response_format;
   const d = await tauriInvoke("openrouter_chat", {
-    payload: { max_tokens: maxTokens, model, system, messages: [{ role: "user", content: user }] },
+    payload,
     runtime: normalizeRuntimeConfig(runtime),
   });
   if (d?.error?.message) throw new Error(d.error.message);
   return d.content[0].text;
 }
 
-export async function llmStream(system, user, onChunk, maxTokens = 2400, model = MODEL_OPTIONS[0].value, runtime = {}) {
+export async function llmStream(system, user, onChunk, maxTokens = 2400, model = MODEL_OPTIONS[0].value, runtime = {}, options = {}) {
   if (!isTauriRuntime()) throw new Error("Desktop runtime required.");
   const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   let fullText = "";
@@ -182,16 +186,21 @@ export async function llmStream(system, user, onChunk, maxTokens = 2400, model =
         }
       });
 
+      const streamPayload = {
+        max_tokens: maxTokens,
+        model,
+        system,
+        stream: true,
+        messages: [{ role: "user", content: user }],
+      };
+      if (typeof options.temperature === "number") streamPayload.temperature = options.temperature;
+      if (typeof options.frequency_penalty === "number") streamPayload.frequency_penalty = options.frequency_penalty;
+      if (options.response_format && typeof options.response_format === "object") streamPayload.response_format = options.response_format;
+
       await tauriInvoke("openrouter_chat_stream", {
         requestId,
         runtime: normalizeRuntimeConfig(runtime),
-        payload: {
-          max_tokens: maxTokens,
-          model,
-          system,
-          stream: true,
-          messages: [{ role: "user", content: user }],
-        },
+        payload: streamPayload,
       });
 
       await pacedEmitter.flush();

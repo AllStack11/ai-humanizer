@@ -43,6 +43,8 @@ struct OpenRouterPayload {
   messages: Option<Vec<ChatMessage>>,
   max_tokens: Option<u32>,
   temperature: Option<f64>,
+  frequency_penalty: Option<f64>,
+  response_format: Option<Value>,
   stream: Option<bool>,
 }
 
@@ -687,12 +689,18 @@ async fn openrouter_chat(
   }
 
   let client = reqwest::Client::new();
-  let request_body = json!({
+  let mut request_body = json!({
     "model": model,
     "messages": messages,
     "max_tokens": payload.max_tokens.unwrap_or(2400),
     "temperature": payload.temperature,
   });
+  if let Some(fp) = payload.frequency_penalty {
+    request_body["frequency_penalty"] = json!(fp);
+  }
+  if let Some(rf) = &payload.response_format {
+    request_body["response_format"] = rf.clone();
+  }
 
   let response = client
     .post(&chat_url)
@@ -862,13 +870,19 @@ async fn openrouter_chat_stream(
   }
 
   let client = reqwest::Client::new();
-  let request_body = json!({
+  let mut request_body = json!({
     "model": model,
     "messages": messages,
     "max_tokens": payload.max_tokens.unwrap_or(2400),
     "temperature": payload.temperature,
     "stream": true,
   });
+  if let Some(fp) = payload.frequency_penalty {
+    request_body["frequency_penalty"] = json!(fp);
+  }
+  if let Some(rf) = &payload.response_format {
+    request_body["response_format"] = rf.clone();
+  }
 
   let response = client
     .post(&chat_url)

@@ -7,3 +7,6 @@ export const MODEL_OPTIONS = [
   { value: "writer/palmyra-x5", label: "Palmyra X5" },
   { value: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
 ];
+
+// Fast/cheap model for internal utility calls (cliché refresh, etc.) — not user-facing
+export const UTILITY_MODEL = "meta-llama/llama-3.3-70b-instruct";

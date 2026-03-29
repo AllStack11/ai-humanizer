@@ -1,5 +1,5 @@
-import { useRef } from "react";
-import { NativeSelect, Text } from "@mantine/core";
+import { useRef, useState } from "react";
+import { Modal, NativeSelect, Text, TextInput } from "@mantine/core";
 import { Button, Card } from "./AppUI.jsx";
 import { APP_THEME_OPTIONS } from "../constants/index.js";
 import { isTauriRuntime } from "../lib/tauri.js";
@@ -10,6 +10,7 @@ export default function ManagementPanel({
   clichesUpdatedAt,
   cliches,
   onRefreshCliches,
+  onUpdateCliches,
   clicheFetching,
   hasProfile,
   isCustomProfile,
@@ -21,6 +22,8 @@ export default function ManagementPanel({
   onFullAppReset,
 }) {
   const importInputRef = useRef(null);
+  const [clicheListOpen, setClicheListOpen] = useState(false);
+  const [newTerm, setNewTerm] = useState("");
 
   return (
     <div className="panel-grid controls-panel">
@@ -45,12 +48,24 @@ export default function ManagementPanel({
             AI Terms
           </label>
           <Text className="text-mono" size="xs">{clichesUpdatedAt ? `${cliches.length} terms · ${clichesUpdatedAt.toLocaleDateString()}` : "Not loaded yet"}</Text>
-          <Button variant="bordered" onPress={onRefreshCliches} isDisabled={clicheFetching} aria-label="Refresh AI terms" tooltip="Refresh the AI-term filter list" iconOnly>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-              <path d="M21 3v6h-6" />
-            </svg>
-          </Button>
+          <div className="toolbar-row">
+            <Button variant="bordered" onPress={onRefreshCliches} isDisabled={clicheFetching} aria-label="Refresh AI terms" tooltip="Refresh the AI-term filter list" iconOnly>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+                <path d="M21 3v6h-6" />
+              </svg>
+            </Button>
+            <Button variant="bordered" onPress={() => setClicheListOpen(true)} aria-label="View AI terms" tooltip="View all AI terms" iconOnly>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="8" y1="6" x2="21" y2="6" />
+                <line x1="8" y1="12" x2="21" y2="12" />
+                <line x1="8" y1="18" x2="21" y2="18" />
+                <line x1="3" y1="6" x2="3.01" y2="6" />
+                <line x1="3" y1="12" x2="3.01" y2="12" />
+                <line x1="3" y1="18" x2="3.01" y2="18" />
+              </svg>
+            </Button>
+          </div>
         </Card.Content>
       </Card>
 
@@ -138,6 +153,91 @@ export default function ManagementPanel({
           </Button>
         </Card.Content>
       </Card>
+      <Modal
+        opened={clicheListOpen}
+        onClose={() => { setClicheListOpen(false); setNewTerm(""); }}
+        title={<strong>AI Terms ({cliches.length})</strong>}
+        zIndex={500}
+        scrollAreaComponent="div"
+        styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", padding: "4px 0 12px" }}>
+          {cliches.map((term, i) => (
+            <span
+              key={i}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "2px 6px 2px 8px",
+                borderRadius: 4,
+                border: "1px solid var(--app-border, rgba(255,255,255,0.12))",
+                background: "var(--app-surface, rgba(255,255,255,0.04))",
+              }}
+            >
+              <Text size="xs" className="text-mono">{term}</Text>
+              <button
+                aria-label={`Remove ${term}`}
+                onClick={() => onUpdateCliches(cliches.filter((_, j) => j !== i))}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  opacity: 0.5,
+                  lineHeight: 1,
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = 0.5)}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </span>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <TextInput
+            placeholder="Add a term…"
+            value={newTerm}
+            onChange={(e) => setNewTerm(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const t = newTerm.trim().toLowerCase();
+                if (t && !cliches.includes(t)) { onUpdateCliches([...cliches, t]); }
+                setNewTerm("");
+              }
+            }}
+            size="xs"
+            style={{ flex: 1 }}
+            classNames={{ input: "text-mono" }}
+          />
+          <button
+            aria-label="Add term"
+            onClick={() => {
+              const t = newTerm.trim().toLowerCase();
+              if (t && !cliches.includes(t)) { onUpdateCliches([...cliches, t]); }
+              setNewTerm("");
+            }}
+            style={{
+              background: "none",
+              border: "1px solid var(--app-border, rgba(255,255,255,0.15))",
+              borderRadius: 4,
+              padding: "4px 8px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M12 5v14" /><path d="M5 12h14" />
+            </svg>
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

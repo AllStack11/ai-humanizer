@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 
 // Constants
 import {
-  MODEL_OPTIONS, BASE_CLICHES, CLICHE_PROMPT,
+  MODEL_OPTIONS, UTILITY_MODEL, CLICHE_PROMPT,
   TONE_LEVELS, ELAB_DEPTHS,
   WRITER_DRAFT_KEY, STYLE_MODAL_DRAFT_KEY, PRIMARY_PROFILE_ID, MODEL_PREF_KEY, CUSTOM_MODELS_KEY, CUSTOM_PROFILES_KEY,
   WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, PROFILE_OPTIONS, DEFAULT_SLOTS,
@@ -33,7 +33,7 @@ import {
   deleteHistoryEntry,
   deleteHistoryEntriesForProfile,
 } from './lib/output-history.js';
-import { STYLE_ANALYZE_SYS, STYLE_MERGE_SYS, HUMANIZE_SYS, ELABORATE_SYS } from './lib/prompts.js';
+import { STYLE_ANALYZE_SYS, STYLE_MERGE_SYS, HUMANIZE_SYS, ELABORATE_SYS, PARTIAL_REGEN_SYS, buildPartialRegenUserPrompt } from './lib/prompts.js';
 import {
   dedupeSampleEntries,
   getErrorMessage,
@@ -112,7 +112,7 @@ export default function App() {
   const [addProfileModalOpen, setAddProfileModalOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [newProfileName, setNewProfileName]     = useState("");
-  const [cliches, setCliches]                   = useState(BASE_CLICHES);
+  const [cliches, setCliches]                   = useState([]);
   const [clichesUpdatedAt, setClichesUpdatedAt] = useState(null);
   const [clicheFetching, setClicheFetching]     = useState(false);
 
@@ -122,6 +122,8 @@ export default function App() {
   const [outputText, setOutputText] = useState("");
   const [outputBaseline, setOutputBaseline] = useState("");
   const [outputCopied, setOutputCopied] = useState(false);
+  const [isPartialStreaming, setIsPartialStreaming] = useState(false);
+  const [partialRegenText, setPartialRegenText] = useState("");
   const [showDiff, setShowDiff] = useState(false);
   const [outputPhase, setOutputPhase] = useState("idle");
   const [toneLevel, setToneLevel]   = useState(2);
@@ -753,12 +755,26 @@ export default function App() {
   function handleUpdateProfileMeta(profileId, metaUpdate) {
     setStyles(prev => {
       const existing = prev[profileId];
+      return {
+        ...prev,
+        [profileId]: {
+          ...(existing || {}),
+          meta: { ...normalizeProfileMeta(existing?.meta), ...metaUpdate },
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    });
+  }
+
+  function handleUpdateProfileTrait(profileId, traitUpdate) {
+    setStyles(prev => {
+      const existing = prev[profileId];
       if (!existing) return prev;
       return {
         ...prev,
         [profileId]: {
           ...existing,
-          meta: { ...normalizeProfileMeta(existing.meta), ...metaUpdate },
+          profile: { ...(existing.profile || {}), ...traitUpdate },
           updatedAt: new Date().toISOString(),
         },
       };
@@ -877,7 +893,7 @@ export default function App() {
 
       setStyles({});
       setActiveProfileId(PROFILE_OPTIONS[0].id);
-      setCliches(BASE_CLICHES);
+      setCliches([]);
       setClichesUpdatedAt(null);
       setClicheFetching(false);
       setMode("humanize");
@@ -935,10 +951,10 @@ export default function App() {
   async function refreshCliches() {
     setClicheFetching(true);
     try {
-      const raw = await llm("", CLICHE_PROMPT, 1400, selectedModel, runtimeConfig);
+      const raw = await llm("", CLICHE_PROMPT, 1400, UTILITY_MODEL, runtimeConfig);
       const fresh = JSON.parse(raw.replace(/```json|```/g,"").trim());
       if (Array.isArray(fresh) && fresh.length > 20) {
-        const merged = [...new Set([...BASE_CLICHES, ...fresh])];
+        const merged = [...new Set(fresh)];
         setCliches(merged); const now = new Date(); setClichesUpdatedAt(now);
         await save("cliches-v3", merged); await save("cliches-ts-v3", now.toISOString());
       }
@@ -998,7 +1014,8 @@ export default function App() {
         const attemptLabel = `Attempt ${attempt + 1}/${attempts.length} via ${selectedModel}`;
         await pushMergeProgressStep("Sending merge request to model.", 45 + (attempt * 16), { detail: attemptLabel });
         pushProcessStep("Sending profile request to model.", "info", `Attempt ${attempt + 1} via ${selectedModel}`);
-        const raw = await llm(plan.systemPrompt, plan.userPrompt, plan.maxTokens, selectedModel, runtimeConfig);
+        const trainingOptions = attempt === 0 ? { response_format: { type: "json_object" } } : {};
+        const raw = await llm(plan.systemPrompt, plan.userPrompt, plan.maxTokens, selectedModel, runtimeConfig, trainingOptions);
         await pushMergeProgressStep("Received model response. Validating profile JSON.", 58 + (attempt * 16), { detail: attemptLabel });
         try {
           profile = parseJsonFromModelOutput(raw);
@@ -1092,6 +1109,24 @@ export default function App() {
     }
   }
 
+  function computeMaxTokens(sourceText, requestMode, depth) {
+    const words = countWords(sourceText);
+    if (requestMode === "elaborate") {
+      // Elaborate output is bounded by ELAB_DEPTHS sentence counts; map depth to token ceiling
+      const TOKEN_BY_DEPTH = [80, 150, 280, 460, 700];
+      return TOKEN_BY_DEPTH[depth] ?? 280;
+    }
+    if (requestMode === "partial") {
+      return Math.min(1200, Math.max(150, Math.round(words * 2.5)));
+    }
+    // humanize: ~1.2x expansion + 50% safety buffer
+    return Math.min(2400, Math.max(300, Math.round(words * 1.8)));
+  }
+
+  // Temperature by tone level: Very Casual (1.1) → Formal (0.6)
+  // Higher tone = lower temp for measured output; lower tone = higher temp for natural variation
+  const TEMP_BY_TONE = [1.1, 1.0, 0.9, 0.75, 0.6];
+
   function applyPromptDecorators(systemPrompt) {
     const presetInstruction = getFormatPresetInstruction(formatPreset);
     const extras = [presetInstruction, oneOffInstruction.trim()].filter(Boolean);
@@ -1164,6 +1199,47 @@ export default function App() {
     elaborate({ regenerateFeedback: trimmedFeedback });
   }
 
+  async function regeneratePartial(selectedText, rawStart, rawEnd) {
+    if (isPartialStreaming || loading) return;
+    if (!selectedText?.trim() || rawStart < 0 || rawEnd <= rawStart) return;
+    const activeProfile = styles[activeProfileId];
+    if (!activeProfile) { setError("Onboard your writing profile first."); return; }
+    if (!(await ensureApiKeyReady("regenerating selection"))) return;
+
+    setIsPartialStreaming(true);
+    setPartialRegenText(selectedText);
+    // Snapshot before/after slices before any async state changes
+    const snapBefore = outputText.slice(0, rawStart);
+    const snapAfter = outputText.slice(rawEnd);
+    try {
+      const confidence = activeProfileConfidence;
+      const filteredProfile = filterProfileForContext(
+        activeProfile.profile, { toneLevel, formatPreset, mode, confidence }
+      );
+      const systemPrompt = PARTIAL_REGEN_SYS(
+        filteredProfile, toneLevel, stripCliches ? cliches : [],
+        activeProfile.name, activeProfile.meta
+      );
+      const result = await llmStream(
+        systemPrompt,
+        buildPartialRegenUserPrompt(outputText, selectedText),
+        (_, full) => setOutputText(snapBefore + full + snapAfter),
+        computeMaxTokens(selectedText, "partial"),
+        selectedModel,
+        runtimeConfig,
+        { temperature: 0.7 }
+      );
+      if (!result?.trim()) throw new Error("The model returned an empty replacement.");
+      setOutputText(snapBefore + result.trim() + snapAfter);
+    } catch (e) {
+      setError("Partial regen failed: " + getErrorMessage(e));
+      setTimeout(() => setError(""), 4000);
+    } finally {
+      setIsPartialStreaming(false);
+      setPartialRegenText("");
+    }
+  }
+
   function openGlobalHistory() {
     setGlobalHistoryQuery("");
     setGlobalHistoryFilters({
@@ -1210,18 +1286,19 @@ export default function App() {
     try {
       pushProcessStep("Validating profile and source text.");
       if (!(await ensureApiKeyReady("rewriting text"))) return;
-      const confidence = computeTraitConfidence(activeProfile);
+      const confidence = activeProfileConfidence;
       const filteredProfile = filterProfileForContext(activeProfile.profile, { toneLevel, formatPreset, mode, confidence });
       const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
       pushProcessStep(filterMsg, "info", filterDetail);
       const basePrompt = applyPromptDecorators(
-        HUMANIZE_SYS(filteredProfile, toneLevel, stripCliches ? cliches : BASE_CLICHES.slice(0,10), activeProfile.name, activeProfile.meta)
+        HUMANIZE_SYS(filteredProfile, toneLevel, stripCliches ? cliches : [], activeProfile.name, activeProfile.meta)
       );
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
         : "";
       const sessionContextBlock = buildSessionContextBlock(sessionIdOverride);
       const baseSystemPrompt = [basePrompt, sessionContextBlock, feedbackPrompt].filter(Boolean).join("\n\n");
+      const humanizeOptions = { temperature: TEMP_BY_TONE[toneLevel] ?? 0.9, frequency_penalty: 0.15 };
       const streamRewrite = async (systemPrompt, userPrompt, firstChunkMessage) => {
         startOutputStream();
         let loggedFirstChunk = false;
@@ -1236,9 +1313,10 @@ export default function App() {
             setOutputText(full);
             setOutputBaseline(full);
           },
-          2400,
+          computeMaxTokens(sourceText, "humanize"),
           selectedModel,
-          runtimeConfig
+          runtimeConfig,
+          humanizeOptions
         );
       };
 
@@ -1297,7 +1375,7 @@ export default function App() {
     try {
       pushProcessStep("Validating profile and source text.");
       if (!(await ensureApiKeyReady("expanding text"))) return;
-      const confidence = computeTraitConfidence(activeProfile);
+      const confidence = activeProfileConfidence;
       const filteredProfile = filterProfileForContext(activeProfile.profile, { toneLevel, formatPreset, mode, confidence });
       const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
       pushProcessStep(filterMsg, "info", filterDetail);
@@ -1320,9 +1398,10 @@ export default function App() {
           setOutputText(full);
           setOutputBaseline(full);
         },
-        2400,
+        computeMaxTokens(sourceText, "elaborate", elabDepth),
         selectedModel,
-        runtimeConfig
+        runtimeConfig,
+        { temperature: TEMP_BY_TONE[toneLevel] ?? 0.9, frequency_penalty: 0.15 }
       );
       if (!out.trim()) {
         pushProcessStep("Model stream ended with no output.", "error");
@@ -1552,6 +1631,9 @@ export default function App() {
                   selectedHistoryPreviewEntryId={selectedHistoryPreviewEntryId}
                   onSelectHistoryPreview={setSelectedHistoryPreviewEntryId}
                   onCopySessionHistoryPart={copySessionHistoryPart}
+                  cliches={cliches}
+                  onPartialRegen={regeneratePartial}
+                  isPartialStreaming={isPartialStreaming}
                 />
               </section>
             ) : null}
@@ -1680,6 +1762,7 @@ export default function App() {
           clichesUpdatedAt={clichesUpdatedAt}
           cliches={cliches}
           onRefreshCliches={refreshCliches}
+          onUpdateCliches={async (updated) => { setCliches(updated); await save("cliches-v3", updated); }}
           clicheFetching={clicheFetching}
           hasProfile={hasProfile}
           isCustomProfile={customProfiles.some((p) => p.id === activeProfileId)}
@@ -1744,6 +1827,9 @@ export default function App() {
           profileLabel={resolveProfileName(activeProfileId)}
           hasProfile={hasProfile}
           confidence={activeProfileConfidence}
+          meta={activeProfile?.meta || null}
+          onUpdateMeta={(metaUpdate) => handleUpdateProfileMeta(activeProfileId, metaUpdate)}
+          onUpdateProfile={(traitUpdate) => handleUpdateProfileTrait(activeProfileId, traitUpdate)}
           onClose={() => setProfileModalOpen(false)}
         />
       )}
