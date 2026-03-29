@@ -65,3 +65,5 @@ __pycache__/
 *.seed
 src-tauri/.voice-humanizer/logs
 src-tauri/.voice-humanizer/logs/openrouter-debug.log
+.vercel
+.env*.local
