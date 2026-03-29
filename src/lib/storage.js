@@ -173,7 +173,7 @@ export async function hasStoredApiKey(runtime) {
 export async function getApiKeyStatus(runtime) {
   // 1. Check Environment first
   const envKey = import.meta.env?.VITE_OPENROUTER_API_KEY;
-  if (envKey && typeof envKey === "string" && envKey.trim().length > 0) {
+  if (envKey && typeof envKey === "string" && envKey.trim().length > 0 && envKey !== "PLACEHOLDER" && !envKey.startsWith("sk-or-v1-")) {
     return { hasKey: true, source: "environment", key: envKey };
   }
 
