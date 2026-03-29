@@ -78,8 +78,70 @@ export function classifyRequestIssue(message) {
 }
 
 export function parseJsonFromModelOutput(raw) {
-  const cleaned = String(raw || "").replace(/```json|```/gi, "").trim();
-  return JSON.parse(cleaned);
+  const input = String(raw || "").trim();
+  if (!input) throw new Error("Empty model response.");
+
+  // Attempt 1: Direct parse (most common for clean JSON)
+  try {
+    const cleaned = input.replace(/```json|```/gi, "").trim();
+    return JSON.parse(cleaned);
+  } catch {
+    // If direct parse fails, move to extraction
+  }
+
+  // Attempt 2: Extract JSON structure from string
+  const startObj = input.indexOf("{");
+  const startArr = input.indexOf("[");
+
+  const startIdx = (startObj !== -1 && startArr !== -1)
+    ? Math.min(startObj, startArr)
+    : (startObj !== -1 ? startObj : startArr);
+
+  if (startIdx === -1) {
+    throw new Error(`Invalid JSON format: no starting '{' or '[' found in output.`);
+  }
+
+  const endChar = input[startIdx] === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = startIdx; i < input.length; i++) {
+    const char = input[i];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === input[startIdx]) {
+        depth++;
+      } else if (char === endChar) {
+        depth--;
+        if (depth === 0) {
+          const potentialJson = input.slice(startIdx, i + 1);
+          try {
+            return JSON.parse(potentialJson);
+          } catch (e) {
+            // If this specific segment fails, continue scanning (might be nested)
+          }
+        }
+      }
+    }
+  }
+
+  throw new Error("Could not extract a valid JSON object or array from the model response.");
 }
 
 export function dedupeSampleEntries(entries) {
