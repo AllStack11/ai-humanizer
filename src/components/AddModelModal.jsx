@@ -4,6 +4,17 @@ import { Button, Input } from "./AppUI.jsx";
 
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 
+export function isTextOnlyCatalogModel(model) {
+  const inputModalities = model?.architecture?.input_modalities;
+  const outputModalities = model?.architecture?.output_modalities;
+
+  if (!Array.isArray(inputModalities) || inputModalities.length === 0) return false;
+  if (!inputModalities.every((modality) => modality === "text")) return false;
+  if (Array.isArray(outputModalities) && !outputModalities.includes("text")) return false;
+
+  return true;
+}
+
 function fmtContext(ctx) {
   if (!ctx) return "";
   if (ctx >= 1_000_000) return `${(ctx / 1_000_000).toFixed(1)}M ctx`;
@@ -40,7 +51,9 @@ export default function AddModelModal({ opened, onClose, onAdd, apiKey }) {
       const res = await fetch(OPENROUTER_MODELS_URL, { headers });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      const list = (json.data || []).sort((a, b) =>
+      const list = (json.data || [])
+        .filter(isTextOnlyCatalogModel)
+        .sort((a, b) =>
         (a.name || a.id).localeCompare(b.name || b.id)
       );
       setModels(list);

@@ -12,6 +12,7 @@ import App, {
   computeWordCharDelta,
   countWords,
   getFormatPresetInstruction,
+  normalizeStoredProfileData,
   normalizeStoredStyles,
   outputLooksLikeAnsweredPrompt,
 } from "./App.jsx";
@@ -25,6 +26,10 @@ const theme = createTheme({
 
 function renderWithMantine(ui) {
   return render(<MantineProvider theme={theme}>{ui}</MantineProvider>);
+}
+
+function setStoredProfileData(styles, customModels = []) {
+  localStorage.setItem("styles-v3", JSON.stringify({ styles, customModels }));
 }
 
 const invokeMock = vi.fn();
@@ -53,11 +58,11 @@ describe("App utility functions", () => {
     expect(segments.filter((s) => s.kind === "cliche").map((s) => s.text)).toEqual(["robust"]);
   });
 
-  test("normalizeStoredStyles migrates primary to personal profile", () => {
+  test("normalizeStoredStyles keeps current profile ids and fields", () => {
     const normalized = normalizeStoredStyles({
-      primary: {
-        id: "primary",
-        name: "My Writing Profile",
+      personal: {
+        id: "personal",
+        name: "Personal",
         profile: { tone: "balanced" },
         sampleEntries: [{ id: 1, text: "old sample", type: "general" }],
         updatedAt: "2025-01-01T00:00:00.000Z",
@@ -66,6 +71,7 @@ describe("App utility functions", () => {
 
     expect(normalized.personal).toBeTruthy();
     expect(normalized.personal.name).toBe("Personal");
+    expect(normalized.personal.sampleCount).toBe(1);
   });
 
   test("normalizeStoredStyles resolves legacy question sample type labels", () => {
@@ -83,6 +89,39 @@ describe("App utility functions", () => {
 
     expect(normalized.personal.sampleEntries[0].type).toBe("question");
     expect(normalized.personal.sampleEntries[1].type).toBe("question");
+  });
+
+  test("normalizeStoredProfileData accepts the new container shape", () => {
+    const normalized = normalizeStoredProfileData({
+      styles: {
+        personal: {
+          id: "personal",
+          name: "Personal",
+          profile: { tone: "balanced" },
+          sampleEntries: [{ id: 1, text: "old sample", type: "general" }],
+        },
+      },
+      customModels: [
+        { value: "custom/model-one", label: "Model One" },
+        { value: "custom/model-one", label: "Duplicate label ignored" },
+      ],
+    });
+
+    expect(normalized.styles.personal).toBeTruthy();
+    expect(normalized.customModels).toEqual([{ value: "custom/model-one", label: "Model One" }]);
+  });
+
+  test("normalizeStoredProfileData filters malformed custom models", () => {
+    const normalized = normalizeStoredProfileData({
+      styles: {},
+      customModels: [
+        null,
+        { value: "   " },
+        { value: "custom/model-two", label: "   " },
+      ],
+    });
+
+    expect(normalized.customModels).toEqual([{ value: "custom/model-two", label: "custom/model-two" }]);
   });
 
   test("buildDiffSegments reports insertions and deletions", () => {
@@ -215,9 +254,7 @@ describe("App UI", () => {
   });
 
   test("streams and applies one-off instructions plus output presets", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -226,8 +263,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     renderWithMantine(<App />);
     await screen.findByRole("button", { name: /add personal samples/i });
@@ -255,15 +291,14 @@ describe("App UI", () => {
     expect(streamCall[1].payload.system).toMatch(/make this sound more confident/i);
     expect(streamCall[1].payload.system).toMatch(/blog post/i);
     expect(await screen.findByRole("region", { name: "LLM output" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand text metrics" }));
     expect(screen.getByText(/FKGL/)).toBeInTheDocument();
     expect(screen.getByText(/LexDiv/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Accept output" })).not.toBeInTheDocument();
   });
 
   test("applies one-off instructions to elaborate requests", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -272,8 +307,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     renderWithMantine(<App />);
     await screen.findByRole("button", { name: /add personal samples/i });
@@ -302,9 +336,7 @@ describe("App UI", () => {
   });
 
   test.skip("stores one-off instructions in output history entries", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -313,8 +345,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     renderWithMantine(<App />);
     await screen.findByRole("button", { name: /add personal samples/i });
@@ -343,9 +374,7 @@ describe("App UI", () => {
   });
 
   test("retries with stricter guardrails when a short conversational input gets answered", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -354,8 +383,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     let streamCount = 0;
     invokeMock.mockImplementation(async (command, args) => {
@@ -397,10 +425,8 @@ describe("App UI", () => {
     expect(streamCalls[1][1].payload.messages[0].content).toMatch(/previous attempt drifted into a response/i);
   });
 
-  test("shows streaming overlay before promoting the result into the output panel", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+  test("shows active generation logs at the bottom of the output panel and hides them after streaming completes", async () => {
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -409,8 +435,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "has_api_key") return true;
@@ -439,23 +464,25 @@ describe("App UI", () => {
 
     fireEvent.keyDown(window, { key: "Enter", metaKey: true });
 
-    await waitFor(() => {
-      expect(
-        screen.queryByText("Generating Preview") || screen.queryByText(/Hello/) || screen.queryByLabelText("Generated output editor")
-      ).toBeTruthy();
-    });
+    const generationLog = await screen.findByRole("log", { name: "Generation activity log" });
+    expect(screen.getByText("Generating Preview")).toBeInTheDocument();
+    expect(screen.getByText(/Preparing prompt and opening model stream\./i)).toBeInTheDocument();
+    expect(within(generationLog).getByText(/Model stream connected\. Receiving rewrite output\./i)).toBeInTheDocument();
     await waitFor(() => {
       expect(
         scrollIntoViewMock.mock.calls.length > 0 || screen.queryByRole("region", { name: "LLM output" })
       ).toBeTruthy();
     });
     expect(await screen.findByRole("region", { name: "LLM output" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("log", { name: "Generation activity log" })).not.toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open logs drawer" }));
+    expect(await screen.findByRole("log", { name: "Process log" })).toHaveTextContent("Model stream connected. Receiving rewrite output.");
   });
 
-  test("keeps the generated rewrite in the output panel instead of merging it into the editor", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+  test("cancels a hung generation and allows retry", async () => {
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -464,8 +491,65 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
+
+    let streamCallCount = 0;
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat_stream") {
+        streamCallCount += 1;
+        if (streamCallCount === 1) {
+          return new Promise(() => {});
+        }
+        const requestId = args.requestId;
+        streamListener?.({ payload: { requestId, chunk: "Hello ", fullText: "Hello ", done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: "again", fullText: "Hello again", done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText: "Hello again", done: true, error: null } });
+        return { ok: true };
+      }
+      return { ok: true };
+    });
+
+    renderWithMantine(<App />);
+    await screen.findByRole("button", { name: /add personal samples/i });
+
+    fireEvent.change(screen.getByPlaceholderText("Paste AI-generated text here…"), {
+      target: { value: "This paragraph is long enough to exercise cancel and retry on a hung request." },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Humanize text" }));
+    expect(await screen.findByRole("button", { name: "Cancel generation" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel generation" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Cancel generation" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Humanize text" })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Humanize text" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "LLM output" })).toHaveTextContent("Hello again");
+    });
+    expect(streamCallCount).toBe(2);
+  });
+
+  test("keeps the generated rewrite in the output panel instead of merging it into the editor", async () => {
+    setStoredProfileData({
+        personal: {
+          id: "personal",
+          name: "Personal",
+          profile: { tone: "balanced" },
+          sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
+          sampleCount: 1,
+          updatedAt: new Date().toISOString(),
+        },
+    });
 
     renderWithMantine(<App />);
     await screen.findByRole("button", { name: /add personal samples/i });
@@ -484,9 +568,7 @@ describe("App UI", () => {
   });
 
   test("copies generated output text from the output toolbar", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -495,8 +577,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     renderWithMantine(<App />);
     await screen.findByRole("button", { name: /add personal samples/i });
@@ -516,9 +597,7 @@ describe("App UI", () => {
   });
 
   test.skip("tracks same-thread generations and shows preset/depth metadata in session and global history", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -527,8 +606,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     let streamCount = 0;
     invokeMock.mockImplementation(async (command, args) => {
@@ -600,9 +678,7 @@ describe("App UI", () => {
   });
 
   test.skip("regenerate updates both session and global history", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -611,8 +687,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     let streamCount = 0;
     invokeMock.mockImplementation(async (command, args) => {
@@ -661,9 +736,7 @@ describe("App UI", () => {
   });
 
   test.skip("allows collapsing and expanding the session history section", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -672,8 +745,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     let streamCount = 0;
     invokeMock.mockImplementation(async (command, args) => {
@@ -722,9 +794,7 @@ describe("App UI", () => {
   });
 
   test.skip("regenerate with feedback includes custom direction in the stream prompt", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -733,8 +803,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     let streamCount = 0;
     invokeMock.mockImplementation(async (command, args) => {
@@ -798,9 +867,7 @@ describe("App UI", () => {
   });
 
   test.skip("uses one session preview toggle to expand and collapse both columns", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -809,8 +876,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "has_api_key") return true;
@@ -863,9 +929,7 @@ describe("App UI", () => {
   });
 
   test.skip("keeps session history on the original model output after the live draft is edited", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -874,8 +938,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "has_api_key") return true;
@@ -922,9 +985,7 @@ describe("App UI", () => {
   });
 
   test.skip("keeps the same session when the source text changes before the next generation", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -933,8 +994,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     let streamCount = 0;
     invokeMock.mockImplementation(async (command, args) => {
@@ -984,9 +1044,7 @@ describe("App UI", () => {
   });
 
   test.skip("keeps session history and carries session context when switching generation type", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -995,8 +1053,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     let streamCount = 0;
     invokeMock.mockImplementation(async (command, args) => {
@@ -1050,9 +1107,7 @@ describe("App UI", () => {
   });
 
   test.skip("keeps session history panel visible after switching generation type", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1061,8 +1116,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "has_api_key") return true;
@@ -1099,9 +1153,7 @@ describe("App UI", () => {
   });
 
   test("keeps generated output visible after switching generation type", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1110,8 +1162,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "has_api_key") return true;
@@ -1147,9 +1198,7 @@ describe("App UI", () => {
   });
 
   test.skip("treats send after editing source text as a regeneration in the same session", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1158,8 +1207,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     let streamCount = 0;
     invokeMock.mockImplementation(async (command, args) => {
@@ -1208,9 +1256,7 @@ describe("App UI", () => {
   });
 
   test.skip("starts a true new session when using the new chat button", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1219,8 +1265,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     let streamCount = 0;
     invokeMock.mockImplementation(async (command, args) => {
@@ -1272,9 +1317,7 @@ describe("App UI", () => {
   });
 
   test.skip("supports deleting the selected entry from global response detail", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1283,8 +1326,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "has_api_key") return true;
       if (command === "get_api_key_status") return { hasKey: true, source: "test" };
@@ -1324,9 +1366,7 @@ describe("App UI", () => {
   });
 
   test.skip("loads persisted history into the global archive on startup and filters by profile", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1343,8 +1383,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     const seededHistory = {
       version: 2,
@@ -1440,9 +1479,7 @@ describe("App UI", () => {
   });
 
   test.skip("reopening global history resets stale filters so recent unsaved entries remain visible", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1451,8 +1488,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "has_api_key") return true;
@@ -1494,9 +1530,7 @@ describe("App UI", () => {
   });
 
   test.skip("persists generated history across app remounts", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1505,8 +1539,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "has_api_key") return true;
@@ -1550,9 +1583,7 @@ describe("App UI", () => {
 
 
   test.skip("profile reset clears history entries for the active profile", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1569,8 +1600,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
     await saveOutputHistory({
       version: 2,
       entriesById: {
@@ -1666,9 +1696,7 @@ describe("App UI", () => {
 
 
   test("submits editor input with Enter", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1677,8 +1705,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     renderWithMantine(<App />);
     await screen.findByRole("button", { name: /add personal samples/i });
@@ -1697,9 +1724,7 @@ describe("App UI", () => {
   });
 
   test("submits markdown-formatted editor input with Enter", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1708,8 +1733,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     renderWithMantine(<App />);
     await screen.findByRole("button", { name: /add personal samples/i });
@@ -1727,9 +1751,7 @@ describe("App UI", () => {
   });
 
   test("does not submit editor input with Shift+Enter", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1738,8 +1760,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     renderWithMantine(<App />);
     await screen.findByRole("button", { name: /add personal samples/i });
@@ -1754,9 +1775,7 @@ describe("App UI", () => {
   });
 
   test("prevents model request when input is below minimum length", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1765,8 +1784,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     renderWithMantine(<App />);
     await screen.findByRole("button", { name: /add personal samples/i });
@@ -1780,9 +1798,7 @@ describe("App UI", () => {
   });
 
   test("submits elaborate-mode editor input with Enter at 10+ chars", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1791,8 +1807,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     renderWithMantine(<App />);
     await screen.findByRole("button", { name: /add personal samples/i });
@@ -1812,9 +1827,7 @@ describe("App UI", () => {
   });
 
   test("reopens API key modal when OpenRouter reports missing key", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1823,8 +1836,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "has_api_key") return true;
@@ -1851,15 +1863,13 @@ describe("App UI", () => {
     fireEvent.keyDown(window, { key: "Enter", metaKey: true });
 
     await screen.findByText("OpenRouter API Key");
-    await screen.findAllByText(/OpenRouter API key is missing\. Add it in settings before rewriting text\./i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/OpenRouter API key is missing, invalid, or unreadable\./i);
     fireEvent.click(screen.getByRole("button", { name: "Open logs drawer" }));
-    expect(await screen.findByRole("log", { name: "Process log" })).toHaveTextContent("API key missing before request start.");
+    expect(await screen.findByRole("log", { name: "Process log" })).toHaveTextContent("OpenRouter API key missing. Opening API key dialog.");
   });
 
   test("shows procedural logging for network failures", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1868,8 +1878,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     invokeMock.mockImplementation(async (command) => {
       if (command === "has_api_key") return true;
@@ -1891,15 +1900,13 @@ describe("App UI", () => {
 
     fireEvent.keyDown(window, { key: "Enter", metaKey: true });
 
-    await screen.findByText(/Failed: Failed to reach OpenRouter: connection refused/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/The app could not reach OpenRouter\. Check your connection and API URL, then try again\./i);
     fireEvent.click(screen.getByRole("button", { name: "Open logs drawer" }));
     expect(await screen.findByRole("log", { name: "Process log" })).toHaveTextContent("Network request failed.");
   });
 
   test("keyboard shortcut submits rewrite requests", async () => {
-    localStorage.setItem(
-      "styles-v3",
-      JSON.stringify({
+    setStoredProfileData({
         personal: {
           id: "personal",
           name: "Personal",
@@ -1908,8 +1915,7 @@ describe("App UI", () => {
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
         },
-      })
-    );
+    });
 
     renderWithMantine(<App />);
     await screen.findByRole("button", { name: /add personal samples/i });

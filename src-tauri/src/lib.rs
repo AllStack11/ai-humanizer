@@ -9,12 +9,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
+use tokio::time::{timeout, Duration};
 
 const DEFAULT_CHAT_COMPLETIONS_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const LOG_LIMIT: usize = 250;
 const DEFAULT_SECRET_DIR_NAME: &str = ".voice-humanizer";
 const API_KEY_FILE_NAME: &str = "openrouter_api_key";
 const DEFAULT_DEBUG_LOG_FILE_NAME: &str = "openrouter-debug.log";
+const OPENROUTER_NETWORK_TIMEOUT_SECS: u64 = 60;
 
 fn runtime_channel() -> &'static str {
   if cfg!(debug_assertions) {
@@ -67,6 +69,7 @@ struct StreamEventPayload {
   fullText: String,
   done: bool,
   error: Option<String>,
+  usage: Option<Value>,
 }
 
 #[allow(non_snake_case)]
@@ -124,6 +127,7 @@ struct RuntimeConfig {
 #[derive(Debug, Serialize)]
 struct StylesBackupResponse {
   styles: Value,
+  customModels: Value,
   savedAt: Option<String>,
   path: String,
 }
@@ -138,6 +142,47 @@ struct SaveStylesResponse {
 
 fn now_iso() -> String {
   Utc::now().to_rfc3339()
+}
+
+fn format_openrouter_http_error(status: u16, body: &str) -> String {
+  let parsed = serde_json::from_str::<Value>(body).ok();
+  let message = parsed
+    .as_ref()
+    .and_then(|v| v.get("error"))
+    .and_then(|e| e.get("message"))
+    .and_then(Value::as_str)
+    .unwrap_or("");
+  let provider_name = parsed
+    .as_ref()
+    .and_then(|v| v.get("error"))
+    .and_then(|e| e.get("metadata"))
+    .and_then(|m| m.get("provider_name"))
+    .and_then(Value::as_str)
+    .unwrap_or("");
+
+  if status == 429 || message.to_lowercase().contains("rate limit") || message.to_lowercase().contains("rate-limited")
+  {
+    if provider_name.is_empty() {
+      return format!("OpenRouter rate limited this request (HTTP 429). {message}");
+    }
+    return format!("OpenRouter rate limited this request via {provider_name} (HTTP 429). {message}");
+  }
+
+  if status == 401 || status == 403 {
+    let suffix = if message.is_empty() { "Check your API key and account permissions." } else { message };
+    return format!("OpenRouter rejected the request (HTTP {status}). {suffix}");
+  }
+
+  if status == 502 || status == 503 || status == 504 {
+    let suffix = if message.is_empty() { "The upstream provider appears unavailable or overloaded." } else { message };
+    return format!("OpenRouter upstream provider error (HTTP {status}). {suffix}");
+  }
+
+  if !message.is_empty() {
+    return format!("OpenRouter returned HTTP {status}. {message}");
+  }
+
+  format!("OpenRouter returned HTTP {status}")
 }
 
 fn parse_dotenv_line_for_key(line: &str, key: &str) -> Option<Option<String>> {
@@ -779,7 +824,10 @@ async fn openrouter_chat(
     );
   }
 
-  let client = reqwest::Client::new();
+  let client = reqwest::Client::builder()
+    .connect_timeout(Duration::from_secs(OPENROUTER_NETWORK_TIMEOUT_SECS))
+    .build()
+    .map_err(|e| e.to_string())?;
   let mut request_body = json!({
     "model": model,
     "messages": messages,
@@ -793,26 +841,44 @@ async fn openrouter_chat(
     request_body["response_format"] = rf.clone();
   }
 
-  let response = client
+  let request = client
     .post(&chat_url)
     .headers(headers)
-    .json(&request_body)
-    .send()
-    .await
-    .map_err(|e| {
-      let msg = format!("Failed to reach OpenRouter: {e}");
-      append_debug_log(&format!("openrouter_chat network_error model={} error={}", model, msg));
-      update_log_entry(
-        &state,
-        &log_id,
-        json!({
-          "status": "failed",
-          "durationMs": started.elapsed().as_millis() as u64,
-          "error": msg,
-        }),
-      );
-      msg
-    })?;
+    .json(&request_body);
+
+  let response = timeout(
+    Duration::from_secs(OPENROUTER_NETWORK_TIMEOUT_SECS),
+    request.send(),
+  )
+  .await
+  .map_err(|_| {
+    let msg = "OpenRouter request timed out before the provider responded.".to_string();
+    append_debug_log(&format!("openrouter_chat start_timeout model={} error={}", model, msg));
+    update_log_entry(
+      &state,
+      &log_id,
+      json!({
+        "status": "failed",
+        "durationMs": started.elapsed().as_millis() as u64,
+        "error": msg,
+      }),
+    );
+    msg
+  })?
+  .map_err(|e| {
+    let msg = format!("Failed to reach OpenRouter: {e}");
+    append_debug_log(&format!("openrouter_chat network_error model={} error={}", model, msg));
+    update_log_entry(
+      &state,
+      &log_id,
+      json!({
+        "status": "failed",
+        "durationMs": started.elapsed().as_millis() as u64,
+        "error": msg,
+      }),
+    );
+    msg
+  })?;
 
   if !response.status().is_success() {
     let status = response.status().as_u16();
@@ -822,15 +888,7 @@ async fn openrouter_chat(
       "openrouter_chat http_error model={} status={} body_preview={}",
       model, status, body_preview
     ));
-    let message = serde_json::from_str::<Value>(&body)
-      .ok()
-      .and_then(|v| {
-        v.get("error")
-          .and_then(|e| e.get("message"))
-          .and_then(Value::as_str)
-          .map(|s| s.to_string())
-      })
-      .unwrap_or_else(|| format!("OpenRouter returned HTTP {status}"));
+    let message = format_openrouter_http_error(status, &body);
 
     update_log_entry(
       &state,
@@ -851,6 +909,15 @@ async fn openrouter_chat(
     .map_err(|e| {
       let msg = format!("Failed to parse OpenRouter response: {e}");
       append_debug_log(&format!("openrouter_chat parse_error model={} error={}", model, msg));
+      update_log_entry(
+        &state,
+        &log_id,
+        json!({
+          "status": "failed",
+          "durationMs": started.elapsed().as_millis() as u64,
+          "error": msg,
+        }),
+      );
       msg
     })?;
 
@@ -960,7 +1027,10 @@ async fn openrouter_chat_stream(
     );
   }
 
-  let client = reqwest::Client::new();
+  let client = reqwest::Client::builder()
+    .connect_timeout(Duration::from_secs(OPENROUTER_NETWORK_TIMEOUT_SECS))
+    .build()
+    .map_err(|e| e.to_string())?;
   let mut request_body = json!({
     "model": model,
     "messages": messages,
@@ -975,29 +1045,61 @@ async fn openrouter_chat_stream(
     request_body["response_format"] = rf.clone();
   }
 
-  let response = client
+  let request = client
     .post(&chat_url)
     .headers(headers)
-    .json(&request_body)
-    .send()
-    .await
-    .map_err(|e| {
-      let msg = format!("Failed to reach OpenRouter: {e}");
-      append_debug_log(&format!(
-        "openrouter_chat_stream network_error request_id={} model={} error={}",
-        request_id, model, msg
-      ));
-      update_log_entry(
-        &state,
-        &log_id,
-        json!({
-          "status": "failed",
-          "durationMs": started.elapsed().as_millis() as u64,
-          "error": msg,
-        }),
-      );
-      msg
-    })?;
+    .json(&request_body);
+
+  let response = timeout(
+    Duration::from_secs(OPENROUTER_NETWORK_TIMEOUT_SECS),
+    request.send(),
+  )
+  .await
+  .map_err(|_| {
+    let msg = "OpenRouter request timed out before the provider responded.".to_string();
+    append_debug_log(&format!(
+      "openrouter_chat_stream start_timeout request_id={} model={} error={}",
+      request_id, model, msg
+    ));
+    update_log_entry(
+      &state,
+      &log_id,
+      json!({
+        "status": "failed",
+        "durationMs": started.elapsed().as_millis() as u64,
+        "error": msg,
+      }),
+    );
+    let _ = app.emit(
+      "openrouter_stream",
+      StreamEventPayload {
+        requestId: request_id.clone(),
+        chunk: None,
+        fullText: String::new(),
+        done: true,
+        error: Some(msg.clone()),
+        usage: None,
+      },
+    );
+    msg
+  })?
+  .map_err(|e| {
+    let msg = format!("Failed to reach OpenRouter: {e}");
+    append_debug_log(&format!(
+      "openrouter_chat_stream network_error request_id={} model={} error={}",
+      request_id, model, msg
+    ));
+    update_log_entry(
+      &state,
+      &log_id,
+      json!({
+        "status": "failed",
+        "durationMs": started.elapsed().as_millis() as u64,
+        "error": msg,
+      }),
+    );
+    msg
+  })?;
 
   if !response.status().is_success() {
     let status = response.status().as_u16();
@@ -1007,15 +1109,7 @@ async fn openrouter_chat_stream(
       "openrouter_chat_stream http_error request_id={} model={} status={} body_preview={}",
       request_id, model, status, body_preview
     ));
-    let message = serde_json::from_str::<Value>(&body)
-      .ok()
-      .and_then(|v| {
-        v.get("error")
-          .and_then(|e| e.get("message"))
-          .and_then(Value::as_str)
-          .map(|s| s.to_string())
-      })
-      .unwrap_or_else(|| format!("OpenRouter returned HTTP {status}"));
+    let message = format_openrouter_http_error(status, &body);
 
     update_log_entry(
       &state,
@@ -1035,6 +1129,7 @@ async fn openrouter_chat_stream(
         fullText: String::new(),
         done: true,
         error: Some(message.clone()),
+        usage: None,
       },
     );
 
@@ -1047,14 +1142,70 @@ async fn openrouter_chat_stream(
   let mut parse_error_count = 0u32;
   let mut event_count = 0u32;
   let mut chunk_count = 0u32;
+  let mut received_first_chunk = false;
+  let mut latest_usage: Option<Value> = None;
 
-  while let Some(next) = bytes_stream.next().await {
+  loop {
+    let next = if received_first_chunk {
+      bytes_stream.next().await
+    } else {
+      match timeout(
+        Duration::from_secs(OPENROUTER_NETWORK_TIMEOUT_SECS),
+        bytes_stream.next(),
+      )
+      .await
+      {
+        Ok(next) => next,
+        Err(_) => {
+          let message = "Model stream did not start streaming before the provider responded timeout elapsed.".to_string();
+          append_debug_log(&format!(
+            "openrouter_chat_stream first_chunk_timeout request_id={} model={} error={}",
+            request_id, model, message
+          ));
+          update_log_entry(
+            &state,
+            &log_id,
+            json!({
+              "status": "failed",
+              "durationMs": started.elapsed().as_millis() as u64,
+              "error": message.clone(),
+            }),
+          );
+          let _ = app.emit(
+            "openrouter_stream",
+            StreamEventPayload {
+              requestId: request_id.clone(),
+              chunk: None,
+              fullText: full_text.clone(),
+              done: true,
+              error: Some(message.clone()),
+              usage: latest_usage.clone(),
+            },
+          );
+          return Err(message);
+        }
+      }
+    };
+
+    let Some(next) = next else {
+      break;
+    };
+
     let bytes = next.map_err(|e| {
       let msg = format!("Stream read failed: {e}");
       append_debug_log(&format!(
         "openrouter_chat_stream read_error request_id={} model={} error={}",
         request_id, model, msg
       ));
+      update_log_entry(
+        &state,
+        &log_id,
+        json!({
+          "status": "failed",
+          "durationMs": started.elapsed().as_millis() as u64,
+          "error": msg,
+        }),
+      );
       msg
     })?;
     buffer.push_str(&String::from_utf8_lossy(&bytes).replace("\r\n", "\n"));
@@ -1108,6 +1259,7 @@ async fn openrouter_chat_stream(
             fullText: full_text.clone(),
             done: true,
             error: Some(message.to_string()),
+            usage: latest_usage.clone(),
           },
         );
 
@@ -1127,10 +1279,15 @@ async fn openrouter_chat_stream(
         return Err(message.to_string());
       }
 
+      if let Some(usage) = payload.get("usage") {
+        latest_usage = Some(usage.clone());
+      }
+
       let chunk = extract_stream_text_chunk(&payload);
       if chunk.is_empty() {
         continue;
       }
+      received_first_chunk = true;
       chunk_count += 1;
       full_text.push_str(&chunk);
 
@@ -1142,6 +1299,7 @@ async fn openrouter_chat_stream(
           fullText: full_text.clone(),
           done: false,
           error: None,
+          usage: latest_usage.clone(),
         },
       );
     }
@@ -1156,6 +1314,7 @@ async fn openrouter_chat_stream(
     json!({
       "status": "completed",
       "durationMs": started.elapsed().as_millis() as u64,
+      "usage": latest_usage.clone(),
       "responsePreview": preview,
     }),
   );
@@ -1177,6 +1336,7 @@ async fn openrouter_chat_stream(
       fullText: full_text,
       done: true,
       error: None,
+      usage: latest_usage,
     },
   );
 
@@ -1265,6 +1425,7 @@ fn get_styles_backup(app: tauri::AppHandle) -> Result<StylesBackupResponse, Stri
   if !path.exists() {
     return Ok(StylesBackupResponse {
       styles: json!({}),
+      customModels: json!([]),
       savedAt: None,
       path: path.display().to_string(),
     });
@@ -1277,9 +1438,15 @@ fn get_styles_backup(app: tauri::AppHandle) -> Result<StylesBackupResponse, Stri
     .filter(|v| v.is_object())
     .cloned()
     .unwrap_or_else(|| json!({}));
+  let custom_models = parsed
+    .get("customModels")
+    .filter(|v| v.is_array())
+    .cloned()
+    .unwrap_or_else(|| json!([]));
 
   Ok(StylesBackupResponse {
     styles,
+    customModels: custom_models,
     savedAt: parsed
       .get("savedAt")
       .and_then(Value::as_str)
@@ -1294,6 +1461,17 @@ fn save_styles_backup(app: tauri::AppHandle, styles: Value) -> Result<SaveStyles
     return Err("Invalid styles payload".to_string());
   }
 
+  let styles_object = styles
+    .get("styles")
+    .filter(|v| v.is_object())
+    .cloned()
+    .unwrap_or_else(|| styles.clone());
+  let custom_models = styles
+    .get("customModels")
+    .filter(|v| v.is_array())
+    .cloned()
+    .unwrap_or_else(|| json!([]));
+
   let path = app_data_backup_path(&app)?;
   if let Some(parent) = path.parent() {
     fs::create_dir_all(parent).map_err(|e| format!("Failed to create backup directory: {e}"))?;
@@ -1302,9 +1480,10 @@ fn save_styles_backup(app: tauri::AppHandle, styles: Value) -> Result<SaveStyles
 
   let saved_at = now_iso();
   let payload = json!({
-    "version": 1,
+    "version": 2,
     "savedAt": saved_at,
-    "styles": styles,
+    "styles": styles_object,
+    "customModels": custom_models,
   });
 
   let formatted = serde_json::to_string_pretty(&payload)

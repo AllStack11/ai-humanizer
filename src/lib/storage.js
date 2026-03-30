@@ -10,7 +10,7 @@ const LEGACY_KEYS = [
   "style-modal-draft-v1",
   "runtime-api-config-v1",
   "selected-model-v1",
-  "custom-model-options-v1",
+  "feature-model-v1",
 ];
 
 async function getStorageScope() {
@@ -76,24 +76,30 @@ export async function loadStylesBackup() {
   }
   try {
     const data = await tauriInvoke("get_styles_backup");
-    return data?.styles && typeof data.styles === "object" && !Array.isArray(data.styles) ? data.styles : null;
+    if (data && typeof data === "object") {
+      return {
+        styles: data?.styles && typeof data.styles === "object" && !Array.isArray(data.styles) ? data.styles : {},
+        customModels: Array.isArray(data?.customModels) ? data.customModels : [],
+      };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
-export async function saveStylesBackupRaw(stylesData) {
+export async function saveStylesBackupRaw(profileData) {
   if (!isTauriRuntime()) {
     // On web, we "back up" to a secondary key to guard against single-key corruption
     try {
       const scoped = await resolveStorageKey("styles-v3-backup");
-      localStorage.setItem(scoped, JSON.stringify(stylesData));
+      localStorage.setItem(scoped, JSON.stringify(profileData));
       return { ok: true };
     } catch (e) {
       throw new Error(`Web backup failed: ${e.message}`);
     }
   }
-  const data = await tauriInvoke("save_styles_backup", { styles: stylesData });
+  const data = await tauriInvoke("save_styles_backup", { styles: profileData });
   return data;
 }
 
@@ -149,9 +155,34 @@ export async function logDiagnosticEvent(route, request = {}, status = "info", e
 }
 
 const WEB_API_KEY_STORAGE_KEY = `${STORAGE_PREFIX}:web:openrouter_api_key`;
-const WEB_RUNTIME_CONFIG_KEY = `${STORAGE_PREFIX}:web:runtime_config`;
+const WEB_RUNTIME_CONFIG_KEY = `${STORAGE_PREFIX}:web:runtime-api-config-v1`;
 const WEB_REQUEST_LOGS_KEY = `${STORAGE_PREFIX}:web:request_logs`;
 const MAX_WEB_LOGS = 60;
+
+function readJsonStorage(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readWebRuntimeConfig() {
+  const runtime = readJsonStorage(WEB_RUNTIME_CONFIG_KEY);
+  return {
+    apiUrl: typeof runtime?.apiUrl === "string" ? runtime.apiUrl.trim() : "",
+    apiKeyFile: typeof runtime?.apiKeyFile === "string" ? runtime.apiKeyFile.trim() : "",
+  };
+}
+
+function writeWebRuntimeConfig(runtime = {}) {
+  const serialized = JSON.stringify({
+    apiUrl: typeof runtime?.apiUrl === "string" ? runtime.apiUrl.trim() : "",
+    apiKeyFile: typeof runtime?.apiKeyFile === "string" ? runtime.apiKeyFile.trim() : "",
+  });
+  localStorage.setItem(WEB_RUNTIME_CONFIG_KEY, serialized);
+}
 
 function appendWebLog(logEntry) {
   try {
@@ -168,6 +199,34 @@ function appendWebLog(logEntry) {
   }
 }
 
+function updateWebLog(id, patch = {}) {
+  try {
+    const raw = localStorage.getItem(WEB_REQUEST_LOGS_KEY);
+    const logs = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(logs)) return;
+    const next = logs.map((entry) => (entry?.id === id ? { ...entry, ...patch } : entry));
+    localStorage.setItem(WEB_REQUEST_LOGS_KEY, JSON.stringify(next));
+  } catch (e) {
+    console.warn("Failed to update web log:", e);
+  }
+}
+
+export async function createWebRequestLog(logEntry) {
+  if (isTauriRuntime()) return "";
+  const id = `web-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  appendWebLog({
+    id,
+    startedAt: new Date().toISOString(),
+    ...logEntry,
+  });
+  return id;
+}
+
+export async function updateWebRequestLog(id, patch = {}) {
+  if (isTauriRuntime() || !id) return;
+  updateWebLog(id, patch);
+}
+
 export async function saveWebRequestLog(logEntry) {
   if (isTauriRuntime()) return;
   appendWebLog({
@@ -180,8 +239,7 @@ export async function saveWebRequestLog(logEntry) {
 export async function hasStoredApiKey(runtime) {
   if (!isTauriRuntime()) {
     // If runtime config provides an apiUrl but no apiKey is needed (e.g. localhost), return true
-    const config = localStorage.getItem(WEB_RUNTIME_CONFIG_KEY);
-    const parsed = config ? JSON.parse(config) : {};
+    const parsed = readWebRuntimeConfig();
     const key = localStorage.getItem(WEB_API_KEY_STORAGE_KEY);
     return !!key || (!!parsed.apiUrl && parsed.apiUrl.includes("localhost"));
   }
@@ -197,8 +255,7 @@ export async function getApiKeyStatus(runtime) {
 
   if (!isTauriRuntime()) {
     const key = localStorage.getItem(WEB_API_KEY_STORAGE_KEY);
-    const config = localStorage.getItem(WEB_RUNTIME_CONFIG_KEY);
-    const parsed = config ? JSON.parse(config) : {};
+    const parsed = readWebRuntimeConfig();
     const hasKey = !!key || (!!parsed.apiUrl && parsed.apiUrl.includes("localhost"));
     return { hasKey, source: "device", key: key || "" };
   }
@@ -219,7 +276,7 @@ export async function storeApiKey(key, runtime) {
   if (!isTauriRuntime()) {
     localStorage.setItem(WEB_API_KEY_STORAGE_KEY, key);
     if (runtime) {
-      localStorage.setItem(WEB_RUNTIME_CONFIG_KEY, JSON.stringify(runtime));
+      writeWebRuntimeConfig(runtime);
     }
     return { ok: true };
   }

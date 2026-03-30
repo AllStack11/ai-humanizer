@@ -1,8 +1,10 @@
 import { MODEL_OPTIONS } from '../constants/models.js';
 import { isTauriRuntime, tauriInvoke, tauriListen } from './tauri.js';
-import { saveWebRequestLog } from './storage.js';
+import { createWebRequestLog, updateWebRequestLog } from './storage.js';
+import { classifyRequestIssue, getErrorMessage, isAbortLikeError } from '../features/app/helpers.js';
 
 const DEFAULT_STREAM_CHARS_PER_SECOND = import.meta.env?.MODE === "test" ? 420 : 380;
+const NETWORK_TIMEOUT_MS = 60000;
 
 const DEFAULT_STREAM_PACING = {
   enabled: true,
@@ -140,15 +142,43 @@ export function extractStreamTextChunk(payload) {
   return "";
 }
 
+function normalizeEnvValue(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "PLACEHOLDER") return "";
+  return trimmed;
+}
+
+function resolveBrowserReferer() {
+  const envAppUrl = normalizeEnvValue(import.meta.env.VITE_OPENROUTER_APP_URL);
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  if (!origin) return envAppUrl;
+  if (!envAppUrl) return origin;
+
+  try {
+    const originUrl = new URL(origin);
+    const envUrl = new URL(envAppUrl);
+    const isLocalOrigin = ["localhost", "127.0.0.1"].includes(originUrl.hostname);
+    const isLocalEnv = ["localhost", "127.0.0.1"].includes(envUrl.hostname);
+    if (isLocalOrigin && isLocalEnv && originUrl.origin !== envUrl.origin) {
+      return origin;
+    }
+  } catch {
+    return origin;
+  }
+
+  return envAppUrl;
+}
+
 async function fetchWithApiKey(url, payload, runtime = {}) {
   // If no explicit key in runtime config, check environment before localStorage (device)
-  const envKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+  const envKey = normalizeEnvValue(import.meta.env.VITE_OPENROUTER_API_KEY);
   const storedKey = !isTauriRuntime() ? localStorage.getItem("vh:web:openrouter_api_key") : "";
   const apiKey = runtime.apiKey || envKey || storedKey || "";
   const headers = {
     "Content-Type": "application/json",
-    "HTTP-Referer": import.meta.env.VITE_OPENROUTER_APP_URL || window.location.origin,
-    "X-Title": import.meta.env.VITE_OPENROUTER_APP_NAME || "Voice Humanizer (Web)",
+    "HTTP-Referer": resolveBrowserReferer(),
+    "X-Title": normalizeEnvValue(import.meta.env.VITE_OPENROUTER_APP_NAME) || "Voice Humanizer (Web)",
   };
   if (apiKey) {
     headers["Authorization"] = `Bearer ${apiKey}`;
@@ -158,6 +188,7 @@ async function fetchWithApiKey(url, payload, runtime = {}) {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
+    signal: runtime.signal,
   });
 
   if (!response.ok) {
@@ -165,6 +196,84 @@ async function fetchWithApiKey(url, payload, runtime = {}) {
     throw new Error(errorBody?.error?.message || `HTTP ${response.status}`);
   }
   return response;
+}
+
+function createAbortError() {
+  const error = new Error("Generation canceled.");
+  error.name = "AbortError";
+  return error;
+}
+
+function createTimeoutError(message) {
+  const error = new Error(message);
+  error.name = "TimeoutError";
+  return error;
+}
+
+function createLinkedTimeoutController(externalSignal, timeoutMs) {
+  const controller = new AbortController();
+  let didTimeout = false;
+  let timeoutId = null;
+
+  const onAbort = () => controller.abort();
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
+  if (timeoutMs > 0) {
+    timeoutId = window.setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, timeoutMs);
+  }
+
+  const cleanup = () => {
+    if (timeoutId != null) {
+      window.clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+    if (externalSignal) externalSignal.removeEventListener("abort", onAbort);
+  };
+
+  return {
+    signal: controller.signal,
+    cleanup,
+    didTimeout: () => didTimeout,
+  };
+}
+
+async function readStreamWithTimeout(reader, timeoutMs, message) {
+  let timeoutId = null;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          reject(createTimeoutError(message));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId != null) window.clearTimeout(timeoutId);
+  }
+}
+
+function buildLogErrorPayload(error, fallbackStatus = "error") {
+  const message = getErrorMessage(error);
+  const issue = classifyRequestIssue(message);
+  return {
+    status: issue.status || fallbackStatus,
+    error: message,
+    errorSummary: issue.summary,
+    errorDetail: issue.detail || message,
+    errorKind: issue.kind || "request_failed",
+    userMessage: issue.userMessage || message,
+  };
 }
 
 export async function llm(system, user, maxTokens = 2400, model = MODEL_OPTIONS[0].value, runtime = {}, options = {}) {
@@ -187,49 +296,56 @@ export async function llm(system, user, maxTokens = 2400, model = MODEL_OPTIONS[
 
   const start = Date.now();
   const url = runtime.apiUrl || "https://openrouter.ai/api/v1/chat/completions";
+  const requestLogId = await createWebRequestLog({
+    route: "llm:chat",
+    model,
+    request: { system, messages: payload.messages },
+    status: "started",
+  });
+  const timeoutController = createLinkedTimeoutController(runtime.signal, NETWORK_TIMEOUT_MS);
   try {
-    const response = await fetchWithApiKey(url, payload, runtime);
+    const response = await fetchWithApiKey(url, payload, { ...runtime, signal: timeoutController.signal });
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || "";
-    saveWebRequestLog({
-      route: "llm:chat",
-      model,
+    if (typeof options.onUsage === "function" && data?.usage) options.onUsage(data.usage);
+    await updateWebRequestLog(requestLogId, {
       durationMs: Date.now() - start,
-      request: { system, messages: payload.messages },
       responsePreview: content.slice(0, 200),
       usage: data.usage,
       status: "success",
     });
     return content;
   } catch (e) {
-    saveWebRequestLog({
-      route: "llm:chat",
-      model,
+    const normalizedError = timeoutController.didTimeout()
+      ? createTimeoutError("OpenRouter request timed out before the provider responded.")
+      : (isAbortLikeError(e) ? createAbortError() : e);
+    await updateWebRequestLog(requestLogId, {
       durationMs: Date.now() - start,
-      request: { system, messages: payload.messages },
-      status: "error",
-      error: e instanceof Error ? e.message : String(e),
+      ...buildLogErrorPayload(normalizedError),
     });
-    throw e;
+    throw normalizedError;
+  } finally {
+    timeoutController.cleanup();
   }
 }
 
 export async function llmStream(system, user, onChunk, maxTokens = 2400, model = MODEL_OPTIONS[0].value, runtime = {}, options = {}) {
-  const builtStreamMessages = [];
-  if (system && system.trim()) builtStreamMessages.push({ role: "system", content: system.trim() });
-  builtStreamMessages.push({ role: "user", content: user });
+  const trimmedSystem = typeof system === "string" ? system.trim() : "";
+  const builtStreamMessages = [{ role: "user", content: user }];
   const streamPayload = {
     max_tokens: maxTokens,
     model,
     stream: true,
     messages: builtStreamMessages,
   };
+  if (trimmedSystem) streamPayload.system = trimmedSystem;
   if (typeof options.temperature === "number") streamPayload.temperature = options.temperature;
   if (typeof options.frequency_penalty === "number") streamPayload.frequency_penalty = options.frequency_penalty;
   if (options.response_format && typeof options.response_format === "object") streamPayload.response_format = options.response_format;
 
   const pacedEmitter = createPacedStreamEmitter(onChunk, runtime?.streamPacing);
   let fullText = "";
+  let latestUsage = null;
 
   if (isTauriRuntime()) {
     const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -238,20 +354,31 @@ export async function llmStream(system, user, onChunk, maxTokens = 2400, model =
     return new Promise(async (resolve, reject) => {
       let finished = false;
       let unlisten = null;
+      const abortHandler = () => settle(reject, createAbortError());
 
       const settle = (fn, value) => {
         if (finished) return;
         finished = true;
+        if (runtime?.signal) runtime.signal.removeEventListener("abort", abortHandler);
         if (typeof unlisten === "function") unlisten();
         pacedEmitter.stop();
         fn(value);
       };
 
       try {
+        if (runtime?.signal?.aborted) {
+          settle(reject, createAbortError());
+          return;
+        }
+        if (runtime?.signal) runtime.signal.addEventListener("abort", abortHandler, { once: true });
         unlisten = await tauriListen("openrouter_stream", (event) => {
           const payload = event.payload || {};
           if (payload.requestId !== requestId) return;
 
+          if (payload.usage) {
+            latestUsage = payload.usage;
+            if (typeof options.onUsage === "function") options.onUsage(payload.usage);
+          }
           if (payload.error) {
             streamError = payload.error;
           }
@@ -282,30 +409,47 @@ export async function llmStream(system, user, onChunk, maxTokens = 2400, model =
   // Browser-based fetch streaming
   const start = Date.now();
   const url = runtime.apiUrl || "https://openrouter.ai/api/v1/chat/completions";
+  const requestLogId = await createWebRequestLog({
+    route: "llm:stream",
+    model,
+    request: { system, messages: streamPayload.messages },
+    stream: true,
+    status: "started",
+  });
+  const fetchTimeoutController = createLinkedTimeoutController(runtime.signal, NETWORK_TIMEOUT_MS);
   let response;
   try {
-    response = await fetchWithApiKey(url, streamPayload, runtime);
+    response = await fetchWithApiKey(url, streamPayload, { ...runtime, signal: fetchTimeoutController.signal });
   } catch (e) {
-    saveWebRequestLog({
-      route: "llm:stream",
-      model,
+    const normalizedError = fetchTimeoutController.didTimeout()
+      ? createTimeoutError("OpenRouter request timed out before the provider responded.")
+      : (isAbortLikeError(e) || runtime?.signal?.aborted ? createAbortError() : e);
+    await updateWebRequestLog(requestLogId, {
       durationMs: Date.now() - start,
-      request: { system, messages: streamPayload.messages },
-      status: "error",
-      error: e instanceof Error ? e.message : String(e),
-      stream: true,
+      ...buildLogErrorPayload(normalizedError),
     });
-    throw e;
+    throw normalizedError;
+  } finally {
+    fetchTimeoutController.cleanup();
   }
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let hasReceivedFirstChunk = false;
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      if (runtime?.signal?.aborted) throw createAbortError();
+      const { done, value } = await readStreamWithTimeout(
+        reader,
+        NETWORK_TIMEOUT_MS,
+        hasReceivedFirstChunk
+          ? "Model stream stalled before the next chunk arrived."
+          : "Model stream did not start streaming before the provider responded timeout elapsed."
+      );
       if (done) break;
+      hasReceivedFirstChunk = true;
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
@@ -319,6 +463,10 @@ export async function llmStream(system, user, onChunk, maxTokens = 2400, model =
 
         try {
           const json = JSON.parse(dataStr);
+          if (json?.usage) {
+            latestUsage = json.usage;
+            if (typeof options.onUsage === "function") options.onUsage(json.usage);
+          }
           const chunk = extractStreamTextChunk(json);
           if (chunk) {
             fullText += chunk;
@@ -330,27 +478,25 @@ export async function llmStream(system, user, onChunk, maxTokens = 2400, model =
       }
     }
     await pacedEmitter.flush();
-    saveWebRequestLog({
-      route: "llm:stream",
-      model,
+    await updateWebRequestLog(requestLogId, {
       durationMs: Date.now() - start,
-      request: { system, messages: streamPayload.messages },
       responsePreview: fullText.slice(0, 200),
+      usage: latestUsage,
       status: "success",
-      stream: true,
     });
     return fullText;
   } catch (e) {
+    const normalizedError = isAbortLikeError(e) || runtime?.signal?.aborted ? createAbortError() : e;
     pacedEmitter.stop();
-    saveWebRequestLog({
-      route: "llm:stream",
-      model,
+    if (runtime?.signal?.aborted || normalizedError?.name === "TimeoutError") {
+      try {
+        await reader.cancel();
+      } catch {}
+    }
+    await updateWebRequestLog(requestLogId, {
       durationMs: Date.now() - start,
-      request: { system, messages: streamPayload.messages },
-      status: "error",
-      error: e instanceof Error ? e.message : String(e),
-      stream: true,
+      ...buildLogErrorPayload(normalizedError),
     });
-    throw e;
+    throw normalizedError;
   }
 }

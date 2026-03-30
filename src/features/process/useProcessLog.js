@@ -37,10 +37,11 @@ export function useProcessLog() {
 
   function logRequestFailure(prefix, message) {
     const issue = classifyRequestIssue(message);
-    pushProcessStep(`${prefix} ${issue.summary}`, "error", issue.detail || message);
+    const level = issue.status === "canceled" ? "warning" : "error";
+    pushProcessStep(`${prefix} ${issue.summary}`, level, issue.detail || message);
     setProcessSummary(`${prefix} ${issue.summary}`);
     setProcessError(message);
-    setProcessNeedsApiKey(String(message || "").toLowerCase().includes("api key"));
+    setProcessNeedsApiKey(issue.kind === "auth");
   }
 
   function completeProcess(summary) {

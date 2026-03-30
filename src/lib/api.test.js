@@ -30,6 +30,7 @@ describe("llm options passthrough", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -132,9 +133,12 @@ describe("llm() browser compatibility", () => {
   beforeEach(() => {
     vi.spyOn(tauri, "isTauriRuntime").mockReturnValue(false);
     mockFetch.mockReset();
+    localStorage.clear();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -168,15 +172,60 @@ describe("llm() browser compatibility", () => {
 
     await expect(llm("sys", "user", 400, "model")).rejects.toThrow("Invalid API Key");
   });
+
+  test("ignores placeholder env keys and falls back to the stored browser key", async () => {
+    vi.stubEnv("VITE_OPENROUTER_API_KEY", "PLACEHOLDER");
+    localStorage.setItem("vh:web:openrouter_api_key", "stored-browser-key");
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "browser response" } }],
+      }),
+    });
+
+    await llm("sys", "user", 400, "model");
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://openrouter.ai/api/v1/chat/completions",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer stored-browser-key",
+        }),
+      })
+    );
+  });
+
+  test("uses the actual local dev origin when the env app url points at a different localhost port", async () => {
+    vi.stubEnv("VITE_OPENROUTER_APP_URL", "http://localhost:5173");
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "browser response" } }],
+      }),
+    });
+
+    await llm("sys", "user", 400, "model", { apiKey: "test-key" });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://openrouter.ai/api/v1/chat/completions",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "HTTP-Referer": "http://localhost:3000",
+        }),
+      })
+    );
+  });
 });
 
 describe("llmStream() browser compatibility", () => {
   beforeEach(() => {
     vi.spyOn(tauri, "isTauriRuntime").mockReturnValue(false);
     mockFetch.mockReset();
+    localStorage.clear();
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -206,5 +255,30 @@ describe("llmStream() browser compatibility", () => {
     expect(result).toBe("chunk1chunk2");
     expect(chunks).toEqual(["chunk1", "chunk2"]);
     expect(mockFetch).toHaveBeenCalled();
+  });
+
+  test("times out and records a failed log when the provider never responds", async () => {
+    vi.useFakeTimers();
+
+    mockFetch.mockImplementation((_, options = {}) => new Promise((_, reject) => {
+      options.signal?.addEventListener("abort", () => {
+        reject(new DOMException("The operation was aborted.", "AbortError"));
+      }, { once: true });
+    }));
+
+    const streamPromise = llmStream("sys", "user", () => {}, 400, "model", {
+      apiKey: "test-key",
+      streamPacing: { enabled: false },
+    });
+    const rejection = expect(streamPromise).rejects.toThrow("OpenRouter request timed out before the provider responded.");
+
+    await vi.advanceTimersByTimeAsync(60000);
+
+    await rejection;
+
+    const logs = JSON.parse(localStorage.getItem("vh:web:request_logs") || "[]");
+    expect(logs[0].route).toBe("llm:stream");
+    expect(logs[0].status).toBe("error");
+    expect(logs[0].error).toContain("timed out before the provider responded");
   });
 });

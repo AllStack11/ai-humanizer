@@ -1,4 +1,4 @@
-import { WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, PROFILE_OPTIONS, PRIMARY_PROFILE_ID, DEFAULT_PROFILE_META } from '../constants/index.js';
+import { WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, PROFILE_OPTIONS, DEFAULT_PROFILE_META } from '../constants/index.js';
 
 function normalizeSampleTypeKey(rawValue = "") {
   return String(rawValue)
@@ -47,31 +47,49 @@ export function formatSampleForPrompt(sample, index) {
   return `--- Sample ${index + 1} (${typeLabel}) ---\n${sample.text.trim()}`;
 }
 
+export function normalizeCustomModels(rawCustomModels) {
+  if (!Array.isArray(rawCustomModels)) return [];
+  const normalized = [];
+  const seen = new Set();
+
+  rawCustomModels.forEach((item) => {
+    const value = typeof item?.value === "string" ? item.value.trim() : "";
+    if (!value || seen.has(value)) return;
+    const label = typeof item?.label === "string" && item.label.trim() ? item.label.trim() : value;
+    seen.add(value);
+    normalized.push({ value, label });
+  });
+
+  return normalized;
+}
+
 export function normalizeStoredStyles(rawStyles) {
   const normalized = {};
   const allEntries = Object.entries(rawStyles || {});
   for (const [id, style] of allEntries) {
-    const sampleEntries = Array.isArray(style.sampleEntries)
+    const sampleEntries = Array.isArray(style?.sampleEntries)
       ? style.sampleEntries
           .map((sample, i) => normalizeSampleSlot(sample, i + 1))
           .filter(sample => sample.text.trim().length > 0)
-      : (Array.isArray(style.samples) ? style.samples : [])
-          .map((text, i) => normalizeSampleSlot({ id: i + 1, text, type: DEFAULT_SAMPLE_TYPE }, i + 1))
-          .filter(sample => sample.text.trim().length > 0);
-    const targetId = id === PRIMARY_PROFILE_ID ? "personal" : id;
-    const profileName = PROFILE_OPTIONS.find((p) => p.id === targetId)?.label || style.name || "Custom";
-    normalized[targetId] = {
+      : [];
+    const profileName = PROFILE_OPTIONS.find((p) => p.id === id)?.label || style.name || "Custom";
+    normalized[id] = {
       ...style,
-      id: targetId,
+      id,
       name: profileName,
       sampleEntries,
-      samples: sampleEntries.map(sample => sample.text),
       sampleCount: sampleEntries.length,
       meta: normalizeProfileMeta(style.meta),
     };
   }
-  if (!Object.keys(normalized).length) return normalized;
   return normalized;
+}
+
+export function normalizeStoredProfileData(rawValue) {
+  return {
+    styles: normalizeStoredStyles(rawValue?.styles),
+    customModels: normalizeCustomModels(rawValue?.customModels),
+  };
 }
 
 export function normalizeProfileMeta(rawMeta) {

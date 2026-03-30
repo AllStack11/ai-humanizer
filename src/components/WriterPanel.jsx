@@ -292,43 +292,12 @@ function ToolbarScale({ label, children }) {
   );
 }
 
-function buildProgressSteps(mode) {
-  if (mode === "humanize") {
-    return [
-      "Analyzing source draft",
-      "Generating humanized rewrite",
-      "Finalizing output",
-    ];
-  }
-  return [
-    "Analyzing source draft",
-    "Generating elaboration",
-    "Finalizing output",
-  ];
-}
-
-function inferActiveProgressStep(progressLabel) {
-  const text = String(progressLabel || "").toLowerCase();
-  if (!text) return 0;
-  if (text.includes("complete") || text.includes("final") || text.includes("done") || text.includes("success")) return 2;
-  if (
-    text.includes("stream") ||
-    text.includes("rewrite") ||
-    text.includes("expand") ||
-    text.includes("model") ||
-    text.includes("generat")
-  ) return 1;
-  return 0;
-}
-
 export default function WriterPanel({
   inputText,
   onChange,
   mode,
   onModeChange,
   loading,
-  progressLabel,
-  progressTone = "neutral",
   hasStyle,
   words,
   cliches,
@@ -359,8 +328,6 @@ export default function WriterPanel({
   const busy = loading;
   const canAttemptSubmit = !busy && meetsMinimum;
   const [instructionOpen, setInstructionOpen] = useState(Boolean(oneOffInstruction?.trim()));
-  const progressSteps = buildProgressSteps(mode);
-  const activeStepIndex = inferActiveProgressStep(progressLabel);
 
   function submitSoon() {
     window.setTimeout(() => onSubmit?.(), 0);
@@ -640,30 +607,6 @@ export default function WriterPanel({
             <div className="editor-meta-outside" aria-hidden="true">
               <span className="text-mono editor-meta-outside-item">{words} words</span>
             </div>
-            {loading ? (
-              <div className="editor-progress-float-wrap">
-                <div
-                  className={`editor-request-progress editor-request-progress--float${progressTone !== "neutral" ? ` editor-request-progress--${progressTone}` : ""}`}
-                  aria-live="polite"
-                  aria-label={progressLabel || "Request in progress"}
-                >
-                  <span className="text-mono editor-request-progress-label">{progressLabel || "Working..."}</span>
-                  <div className="editor-request-progress-steps" aria-hidden="true">
-                    {progressSteps.map((step, index) => {
-                      const state = index < activeStepIndex ? "done" : index === activeStepIndex ? "active" : "pending";
-                      return (
-                        <span key={step} className={`text-mono editor-request-progress-step editor-request-progress-step--${state}`}>
-                          {step}
-                        </span>
-                      );
-                    })}
-                  </div>
-                  <div className="editor-request-progress-track" aria-hidden="true">
-                    <span className="editor-request-progress-bar" />
-                  </div>
-                </div>
-              </div>
-            ) : null}
           </div>
 
         </Card.Content>

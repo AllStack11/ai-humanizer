@@ -1,5 +1,5 @@
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
-import { storeApiKey, hasStoredApiKey, clearStoredApiKey, getApiKeyStatus } from "./storage.js";
+import { storeApiKey, hasStoredApiKey, clearStoredApiKey, getApiKeyStatus, load, save } from "./storage.js";
 import * as tauri from "./tauri.js";
 
 describe("storage browser compatibility", () => {
@@ -34,6 +34,17 @@ describe("storage browser compatibility", () => {
     const hasKey = await hasStoredApiKey();
     expect(hasKey).toBe(false);
     expect(localStorage.getItem("vh:web:openrouter_api_key")).toBeNull();
+  });
+
+  test("stores runtime config in the current web storage key", async () => {
+    await save("runtime-api-config-v1", { apiUrl: "http://127.0.0.1:11434/v1/chat/completions", apiKeyFile: "" });
+
+    expect(localStorage.getItem("vh:web:runtime-api-config-v1")).toBe(
+      JSON.stringify({ apiUrl: "http://127.0.0.1:11434/v1/chat/completions", apiKeyFile: "" })
+    );
+
+    const loaded = await load("runtime-api-config-v1");
+    expect(loaded).toEqual({ apiUrl: "http://127.0.0.1:11434/v1/chat/completions", apiKeyFile: "" });
   });
 });
 

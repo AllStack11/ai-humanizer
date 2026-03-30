@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import {
   MODEL_OPTIONS, UTILITY_MODEL, CLICHE_PROMPT,
   TONE_LEVELS, ELAB_DEPTHS,
-  WRITER_DRAFT_KEY, STYLE_MODAL_DRAFT_KEY, PRIMARY_PROFILE_ID, MODEL_PREF_KEY, CUSTOM_MODELS_KEY, CUSTOM_PROFILES_KEY,
+  WRITER_DRAFT_KEY, STYLE_MODAL_DRAFT_KEY, MODEL_PREF_KEY, FEATURE_MODEL_PREF_KEY, CUSTOM_PROFILES_KEY,
   WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, PROFILE_OPTIONS, DEFAULT_SLOTS,
   OUTPUT_PRESET_OPTIONS, APP_THEME_OPTIONS,
 } from './constants/index.js';
@@ -20,9 +20,11 @@ import {
 } from './lib/storage.js';
 import { STYLE_ANALYZE_SYS, STYLE_MERGE_SYS, HUMANIZE_SYS, ELABORATE_SYS, PARTIAL_REGEN_SYS, buildPartialRegenUserPrompt } from './lib/prompts.js';
 import {
+  classifyRequestIssue,
   dedupeSampleEntries,
   getErrorMessage,
   isMissingApiKeyError,
+  isAbortLikeError,
   parseJsonFromModelOutput,
 } from "./features/app/helpers.js";
 import {
@@ -35,10 +37,11 @@ import { filterProfileForContext, describeProfileFilter } from "./lib/profileFil
 // Utils
 import {
   countWords,
+  estimateTokenCount,
   computeTextMetricSnapshot,
   computeWordCharDelta,
   buildClicheRanges,
-  normalizeSampleSlot, normalizeStoredStyles, getFilledSlots, formatSampleForPrompt,
+  normalizeSampleSlot, normalizeStoredStyles, normalizeStoredProfileData, getFilledSlots, formatSampleForPrompt,
   collectCoverageGaps, computeProfileHealth, hasTrainedProfile, normalizeProfileMeta, computeTraitConfidence,
   getFormatPresetInstruction, formatRelativeTime,
 } from './utils/index.js';
@@ -64,6 +67,45 @@ import { Button, Input } from "./components/AppUI.jsx";
 export default function App() {
   const RUNTIME_API_CONFIG_KEY = "runtime-api-config-v1";
   const PROFILE_STEP_DELAY_MS = 650;
+  const resolveCustomModelOptions = (rawCustomModels = []) => {
+    const mergedModelOptions = [...MODEL_OPTIONS];
+    rawCustomModels.forEach((custom) => {
+      if (!mergedModelOptions.some((entry) => entry.value === custom.value)) {
+        mergedModelOptions.push(custom);
+      }
+    });
+    return mergedModelOptions;
+  };
+  const mergeModelOptionsWithSelections = (rawCustomModels = [], selected = "", feature = "") => {
+    const mergedModelOptions = resolveCustomModelOptions(rawCustomModels);
+    [selected, feature].forEach((value) => {
+      if (typeof value === "string" && value.trim() && !mergedModelOptions.some((item) => item.value === value.trim())) {
+        mergedModelOptions.push({ value: value.trim(), label: `${value.trim()} (custom)` });
+      }
+    });
+    return mergedModelOptions;
+  };
+  const normalizeUsage = (usage) => {
+    if (!usage || typeof usage !== "object") return null;
+    const rawPromptTokens = Number(usage.prompt_tokens ?? usage.input_tokens);
+    const rawCompletionTokens = Number(usage.completion_tokens ?? usage.output_tokens);
+    const totalTokens = Number(
+      usage.total_tokens
+      ?? ((Number.isFinite(rawPromptTokens) ? rawPromptTokens : 0) + (Number.isFinite(rawCompletionTokens) ? rawCompletionTokens : 0))
+    );
+    const promptTokens = Number.isFinite(rawPromptTokens)
+      ? rawPromptTokens
+      : (Number.isFinite(totalTokens) && Number.isFinite(rawCompletionTokens) ? Math.max(0, totalTokens - rawCompletionTokens) : null);
+    const completionTokens = Number.isFinite(rawCompletionTokens)
+      ? rawCompletionTokens
+      : (Number.isFinite(totalTokens) && Number.isFinite(rawPromptTokens) ? Math.max(0, totalTokens - rawPromptTokens) : null);
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens: Number.isFinite(totalTokens) ? totalTokens : null,
+    };
+  };
+  const STREAM_WAIT_NOTICE_MS = 8000;
 
   async function ensureApiKeyReady(actionLabel) {
     pushProcessStep("Checking API key availability.");
@@ -107,6 +149,7 @@ export default function App() {
   const [outputCopied, setOutputCopied] = useState(false);
   const [isPartialStreaming, setIsPartialStreaming] = useState(false);
   const [partialRegenText, setPartialRegenText] = useState("");
+  const [partialHighlight, setPartialHighlight] = useState(null);
   const [showDiff, setShowDiff] = useState(false);
   const [outputPhase, setOutputPhase] = useState("idle");
   const [toneLevel, setToneLevel]   = useState(2);
@@ -117,6 +160,9 @@ export default function App() {
   const [themeKey, setThemeKey] = useState(APP_THEME_OPTIONS[0].value);
   const [modelOptions, setModelOptions] = useState(MODEL_OPTIONS);
   const [selectedModel, setSelectedModel] = useState(MODEL_OPTIONS[0].value);
+  const [featureModel, setFeatureModel] = useState(MODEL_OPTIONS[0].value);
+  const activeGenerationControllerRef = useRef(null);
+  const activeGenerationIdRef = useRef(0);
   const [addModelModalOpen, setAddModelModalOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -138,6 +184,8 @@ export default function App() {
   // Async feedback
   const [loading, setLoading] = useState(false);
   const [requestLoading, setRequestLoading] = useState(false);
+  const [outputUsage, setOutputUsage] = useState(null);
+  const [inputUsage, setInputUsage] = useState(null);
   const [profileMergeLoading, setProfileMergeLoading] = useState(false);
   const [mergeProgressOpen, setMergeProgressOpen] = useState(false);
   const [mergeProgressValue, setMergeProgressValue] = useState(0);
@@ -171,6 +219,15 @@ export default function App() {
   const [runtimeConfig, setRuntimeConfig] = useState({ apiUrl: "", apiKeyFile: "" });
   const prefersReducedMotion = useReducedMotion();
   const isTestEnv = import.meta.env.MODE === "test";
+  const partialHighlightFadeRef = useRef(null);
+  const customModelOptions = useMemo(
+    () => modelOptions.filter((entry) => !MODEL_OPTIONS.some((base) => base.value === entry.value)),
+    [modelOptions]
+  );
+  const persistedProfileData = useMemo(
+    () => ({ styles, customModels: customModelOptions }),
+    [styles, customModelOptions]
+  );
 
 
   function readComposerTextFromDom() {
@@ -211,6 +268,26 @@ export default function App() {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  function clearPartialHighlightFade() {
+    if (partialHighlightFadeRef.current) {
+      window.clearTimeout(partialHighlightFadeRef.current);
+      partialHighlightFadeRef.current = null;
+    }
+  }
+
+  function clearPartialHighlight() {
+    clearPartialHighlightFade();
+    setPartialHighlight(null);
+  }
+
+  function scheduleCompletedPartialHighlightFade() {
+    clearPartialHighlightFade();
+    partialHighlightFadeRef.current = window.setTimeout(() => {
+      setPartialHighlight(null);
+      partialHighlightFadeRef.current = null;
+    }, 1500);
+  }
+
   function clearMergeProgress() {
     setMergeProgressValue(0);
     setMergeProgressLabel("");
@@ -243,17 +320,17 @@ export default function App() {
   useEffect(() => {
     const handleStorageChange = async (e) => {
       if (!e.key) return;
-      
+
       // Identify the keys that should trigger a state refresh
       const isStyleKey = e.key.includes("styles-v3");
       const isCustomProfileKey = e.key.includes(CUSTOM_PROFILES_KEY);
-      
+
       if (isStyleKey) {
-        const nextStyles = await load("styles-v3");
-        // Update state but don't re-save to avoid loops
-        if (nextStyles) setStyles(normalizeStoredStyles(nextStyles));
+        const nextProfileData = normalizeStoredProfileData(await load("styles-v3"));
+        setStyles(nextProfileData.styles);
+        setModelOptions(mergeModelOptionsWithSelections(nextProfileData.customModels, selectedModel, featureModel));
       }
-      
+
       if (isCustomProfileKey) {
         const nextCustom = await load(CUSTOM_PROFILES_KEY);
         if (Array.isArray(nextCustom)) setCustomProfiles(nextCustom);
@@ -262,7 +339,7 @@ export default function App() {
 
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
-  }, []);
+  }, [featureModel, selectedModel]);
 
   // Load persisted data
   useEffect(() => {
@@ -273,12 +350,13 @@ export default function App() {
           defaultActiveProfileId: PROFILE_OPTIONS[0].id,
           defaultTheme: APP_THEME_OPTIONS[0].value,
           defaultModel: MODEL_OPTIONS[0].value,
+          defaultFeatureModel: MODEL_OPTIONS[0].value,
         }).catch(() => {});
 
         const [
           storedStyles, storedCustomProfiles, storedCliches, storedTs,
-          storedWriterDraft, storedOutputHistory, storedRuntimeConfig,
-          storedModel, storedCustomModels,
+          storedWriterDraft, storedRuntimeConfig,
+          storedModel, storedFeatureModel,
         ] = await Promise.all([
           load("styles-v3"),
           load(CUSTOM_PROFILES_KEY),
@@ -287,7 +365,7 @@ export default function App() {
           load(`${WRITER_DRAFT_KEY}:${PROFILE_OPTIONS[0].id}`),
           load(RUNTIME_API_CONFIG_KEY),
           load(MODEL_PREF_KEY),
-          load(CUSTOM_MODELS_KEY),
+          load(FEATURE_MODEL_PREF_KEY),
         ]);
         if (Array.isArray(storedCustomProfiles)) setCustomProfiles(storedCustomProfiles);
         const resolvedRuntimeConfig = {
@@ -298,56 +376,48 @@ export default function App() {
         setApiUrlInput(resolvedRuntimeConfig.apiUrl);
         setApiKeyFileInput(resolvedRuntimeConfig.apiKeyFile);
         let stylesSource = "localStorage";
-        let resolvedStyles = storedStyles ? normalizeStoredStyles(storedStyles) : {};
-        if (!Object.keys(resolvedStyles).length) {
+        let resolvedProfileData = normalizeStoredProfileData(storedStyles);
+        if (!Object.keys(resolvedProfileData.styles).length && !resolvedProfileData.customModels.length) {
           stylesSource = "backup";
           const backupStyles = await loadStylesBackup();
           if (backupStyles) {
-            resolvedStyles = normalizeStoredStyles(backupStyles);
-            if (Object.keys(resolvedStyles).length) await save("styles-v3", resolvedStyles);
+            resolvedProfileData = normalizeStoredProfileData(backupStyles);
+            if (Object.keys(resolvedProfileData.styles).length || resolvedProfileData.customModels.length) {
+              await save("styles-v3", resolvedProfileData);
+            }
           }
-          if (!Object.keys(resolvedStyles).length) stylesSource = "empty";
+          if (!Object.keys(resolvedProfileData.styles).length && !resolvedProfileData.customModels.length) stylesSource = "empty";
         }
 
-        setStyles(resolvedStyles);
-        const trainedProfiles = Object.values(resolvedStyles).filter((profile) => hasTrainedProfile(profile));
+        setStyles(resolvedProfileData.styles);
+        const trainedProfiles = Object.values(resolvedProfileData.styles).filter((profile) => hasTrainedProfile(profile));
         if (!trainedProfiles.length) {
           setStyleModalOpen(true);
-        } else if (!resolvedStyles[activeProfileId]) {
+        } else if (!resolvedProfileData.styles[activeProfileId]) {
           setActiveProfileId(trainedProfiles[0]?.id || PROFILE_OPTIONS[0].id);
         }
 
         logDiagnosticEvent("app:init:profiles_loaded", {
           source: stylesSource,
           activeProfileId,
-          profileIds: Object.keys(resolvedStyles),
-          profileCount: Object.keys(resolvedStyles).length,
+          profileIds: Object.keys(resolvedProfileData.styles),
+          profileCount: Object.keys(resolvedProfileData.styles).length,
           trainedProfileCount: trainedProfiles.length,
-          untrainedProfileCount: Object.keys(resolvedStyles).length - trainedProfiles.length,
+          untrainedProfileCount: Object.keys(resolvedProfileData.styles).length - trainedProfiles.length,
         }).catch(() => {});
 
         if (storedCliches) setCliches(storedCliches);
         if (storedTs)      setClichesUpdatedAt(new Date(storedTs));
         if (typeof storedWriterDraft === "string") setInputText(storedWriterDraft);
-        const validCustomModels = Array.isArray(storedCustomModels)
-          ? storedCustomModels
-            .filter((item) => item && typeof item.value === "string" && item.value.trim())
-            .map((item) => ({ value: item.value.trim(), label: typeof item.label === "string" && item.label.trim() ? item.label.trim() : item.value.trim() }))
-          : [];
-
-        const mergedModelOptions = [...MODEL_OPTIONS];
-        validCustomModels.forEach((custom) => {
-          if (!mergedModelOptions.some((entry) => entry.value === custom.value)) {
-            mergedModelOptions.push(custom);
-          }
-        });
-
-        if (typeof storedModel === "string" && storedModel.trim() && !mergedModelOptions.some((item) => item.value === storedModel.trim())) {
-          mergedModelOptions.push({ value: storedModel.trim(), label: `${storedModel.trim()} (custom)` });
-        }
+        const mergedModelOptions = mergeModelOptionsWithSelections(
+          resolvedProfileData.customModels,
+          typeof storedModel === "string" ? storedModel : "",
+          typeof storedFeatureModel === "string" ? storedFeatureModel : ""
+        );
 
         setModelOptions(mergedModelOptions);
         if (typeof storedModel === "string" && storedModel.trim()) setSelectedModel(storedModel.trim());
+        if (typeof storedFeatureModel === "string" && storedFeatureModel.trim()) setFeatureModel(storedFeatureModel.trim());
 
         const stale = !storedTs || (Date.now() - new Date(storedTs)) > 3 * 86400000;
         if (stale) refreshCliches();
@@ -367,6 +437,7 @@ export default function App() {
 
         logDiagnosticEvent("app:init:config_loaded", {
           selectedModel: (typeof storedModel === "string" && storedModel.trim()) ? storedModel : MODEL_OPTIONS[0].value,
+          featureModel: (typeof storedFeatureModel === "string" && storedFeatureModel.trim()) ? storedFeatureModel : MODEL_OPTIONS[0].value,
           clichesLoaded: Array.isArray(storedCliches) ? storedCliches.length : 0,
           clichesUpdatedAt: storedTs || null,
           writerDraftChars: typeof storedWriterDraft === "string" ? storedWriterDraft.length : 0,
@@ -408,6 +479,8 @@ export default function App() {
     return () => window.cancelAnimationFrame(frame);
   }, [outputPhase]);
 
+  useEffect(() => () => clearPartialHighlightFade(), []);
+
   async function saveStylesBackupWithRetry(stylesData) {
     const DELAYS = [1000, 2000, 4000];
     setBackupStatus("saving");
@@ -448,9 +521,9 @@ export default function App() {
 
   useEffect(() => {
     if (!backupSyncReadyRef.current) return;
-    save("styles-v3", styles);
-    saveStylesBackupWithRetry(styles);
-  }, [styles]);
+    save("styles-v3", persistedProfileData);
+    saveStylesBackupWithRetry(persistedProfileData);
+  }, [persistedProfileData]);
   useEffect(() => {
     if (!backupSyncReadyRef.current) return;
     save(CUSTOM_PROFILES_KEY, customProfiles);
@@ -463,10 +536,7 @@ export default function App() {
     return () => clearInterval(id);
   }, [backupStatus, backupLastSavedAt]);
   useEffect(() => { save(MODEL_PREF_KEY, selectedModel); }, [selectedModel]);
-  useEffect(() => {
-    const customOnly = modelOptions.filter((entry) => !MODEL_OPTIONS.some((base) => base.value === entry.value));
-    save(CUSTOM_MODELS_KEY, customOnly);
-  }, [modelOptions]);
+  useEffect(() => { save(FEATURE_MODEL_PREF_KEY, featureModel); }, [featureModel]);
   useEffect(() => { save(`${WRITER_DRAFT_KEY}:${activeProfileId}`, inputText); }, [inputText]);
   useEffect(() => {
     if (!backupSyncReadyRef.current) return;
@@ -484,6 +554,7 @@ export default function App() {
     if (next.length === 0) return; // never remove the last model
     setModelOptions(next);
     if (selectedModel === value) setSelectedModel(next[0].value);
+    if (featureModel === value) setFeatureModel(next[0].value);
   }
 
   function handleAddModel({ value, label }) {
@@ -529,7 +600,7 @@ export default function App() {
   // ── Profile export / import ──
   function exportProfile() {
     const blob = new Blob(
-      [JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), styles }, null, 2)],
+      [JSON.stringify({ version: 2, exportedAt: new Date().toISOString(), ...persistedProfileData }, null, 2)],
       { type: "application/json" }
     );
     const url = URL.createObjectURL(blob);
@@ -544,10 +615,13 @@ export default function App() {
     reader.onload = (e) => {
       try {
         const parsed = JSON.parse(e.target.result);
-        const rawStyles = parsed?.styles || parsed;
-        const normalized = normalizeStoredStyles(rawStyles);
-        if (!Object.keys(normalized).length) { setError("Import failed: no valid profile found."); return; }
-        setStyles(normalized);
+        const normalized = normalizeStoredProfileData(parsed);
+        if (!Object.keys(normalized.styles).length && !normalized.customModels.length) {
+          setError("Import failed: no valid profile found.");
+          return;
+        }
+        setStyles(normalized.styles);
+        setModelOptions(mergeModelOptionsWithSelections(normalized.customModels, selectedModel, featureModel));
       } catch { setError("Import failed: invalid JSON file."); }
     };
     reader.readAsText(file);
@@ -592,14 +666,13 @@ export default function App() {
         name: profileName,
         profile: null,
         sampleEntries: [],
-        samples: [],
         sampleCount: 0,
         createdAt: styles[activeProfileId]?.createdAt || new Date().toISOString(),
       },
     };
     setStyles(nextStyles);
-    await save("styles-v3", nextStyles);
-    await saveStylesBackupWithRetry(nextStyles);
+    await save("styles-v3", { styles: nextStyles, customModels: customModelOptions });
+    await saveStylesBackupWithRetry({ styles: nextStyles, customModels: customModelOptions });
 
     clearOutputState();
     setStyleModalOpen(false);
@@ -633,8 +706,8 @@ export default function App() {
       },
     };
     setStyles(updatedStyles);
-    await save("styles-v3", updatedStyles);
-    if (backupSyncReadyRef.current) await saveStylesBackupWithRetry(updatedStyles);
+    await save("styles-v3", { styles: updatedStyles, customModels: customModelOptions });
+    if (backupSyncReadyRef.current) await saveStylesBackupWithRetry({ styles: updatedStyles, customModels: customModelOptions });
   }
 
   async function handleUpdateProfileTrait(profileId, traitUpdate) {
@@ -649,8 +722,8 @@ export default function App() {
       },
     };
     setStyles(updatedStyles);
-    await save("styles-v3", updatedStyles);
-    if (backupSyncReadyRef.current) await saveStylesBackupWithRetry(updatedStyles);
+    await save("styles-v3", { styles: updatedStyles, customModels: customModelOptions });
+    if (backupSyncReadyRef.current) await saveStylesBackupWithRetry({ styles: updatedStyles, customModels: customModelOptions });
   }
 
   function handleAddProfile() {
@@ -692,8 +765,8 @@ export default function App() {
     await save(`${STYLE_MODAL_DRAFT_KEY}:${activeProfileId}`, null);
     setCustomProfiles(nextCustomProfiles);
     setStyles(nextStyles);
-    await save("styles-v3", nextStyles);
-    await saveStylesBackupWithRetry(nextStyles);
+    await save("styles-v3", { styles: nextStyles, customModels: customModelOptions });
+    await saveStylesBackupWithRetry({ styles: nextStyles, customModels: customModelOptions });
 
     const fallbackId = nextCustomProfiles[0]?.id || PROFILE_OPTIONS[0].id;
     setActiveProfileId(fallbackId);
@@ -772,6 +845,7 @@ export default function App() {
       setThemeKey(APP_THEME_OPTIONS[0].value);
       setModelOptions(MODEL_OPTIONS);
       setSelectedModel(MODEL_OPTIONS[0].value);
+      setFeatureModel(MODEL_OPTIONS[0].value);
       setLogsOpen(false);
       setRequestLogs([]);
       setLogsLoading(false);
@@ -859,11 +933,11 @@ export default function App() {
       let lastParseError = null;
       for (let attempt = 0; attempt < attempts.length; attempt += 1) {
         const plan = attempts[attempt];
-        const attemptLabel = `Attempt ${attempt + 1}/${attempts.length} via ${selectedModel}`;
+        const attemptLabel = `Attempt ${attempt + 1}/${attempts.length} via ${featureModel}`;
         await pushMergeProgressStep("Sending merge request to model.", 45 + (attempt * 16), { detail: attemptLabel });
-        pushProcessStep("Sending profile request to model.", "info", `Attempt ${attempt + 1} via ${selectedModel}`);
+        pushProcessStep("Sending profile request to model.", "info", `Attempt ${attempt + 1} via ${featureModel}`);
         const trainingOptions = attempt === 0 ? { response_format: { type: "json_object" } } : {};
-        const raw = await llm(plan.systemPrompt, plan.userPrompt, plan.maxTokens, selectedModel, runtimeConfig, trainingOptions);
+        const raw = await llm(plan.systemPrompt, plan.userPrompt, plan.maxTokens, featureModel, runtimeConfig, trainingOptions);
         await pushMergeProgressStep("Received model response. Validating profile JSON.", 58 + (attempt * 16), { detail: attemptLabel });
         try {
           profile = parseJsonFromModelOutput(raw);
@@ -882,7 +956,7 @@ export default function App() {
             {
               attempt: attempt + 1,
               mode: existing ? "merge" : "analyze",
-              model: selectedModel,
+              model: featureModel,
               maxTokens: plan.maxTokens,
               responseChars: String(raw || "").length,
               responseTail: String(raw || "").slice(-180),
@@ -901,9 +975,7 @@ export default function App() {
       setStyles(prev => {
         const existingProfile = prev[activeProfileId];
         const existingSamples = existingProfile
-          ? (Array.isArray(existingProfile.sampleEntries)
-              ? existingProfile.sampleEntries.map((sample, i) => normalizeSampleSlot(sample, i + 1))
-              : (Array.isArray(existingProfile.samples) ? existingProfile.samples : []).map((text, i) => normalizeSampleSlot({ id: i + 1, text }, i + 1)))
+          ? existingProfile.sampleEntries.map((sample, i) => normalizeSampleSlot(sample, i + 1))
           : [];
         const sampleEntries = dedupeSampleEntries([...existingSamples, ...filled]);
         const createdAt = existingProfile?.createdAt || new Date().toISOString();
@@ -915,7 +987,6 @@ export default function App() {
             name: profileName,
             profile: existing ? { ...existing.profile, ...profile } : profile,
             sampleEntries,
-            samples: sampleEntries.map(sample => sample.text),
             sampleCount: sampleEntries.length,
             createdAt,
             updatedAt: new Date().toISOString(),
@@ -938,6 +1009,7 @@ export default function App() {
       return true;
     } catch (e) {
       const message = getErrorMessage(e);
+      const issue = classifyRequestIssue(message);
       await pushMergeProgressStep("Profile merge failed.", 100, { level: "error", detail: message, delay: false });
       if (isMissingApiKeyError(message)) {
         pushProcessStep("OpenRouter API key missing. Opening API key dialog.", "error");
@@ -945,7 +1017,7 @@ export default function App() {
         setApiKeyModalOpen(true);
       }
       logRequestFailure("Profile training failed.", message);
-      setError("Failed: " + message);
+      setError(issue.userMessage || message);
       setTimeout(() => {
         setMergeProgressOpen(false);
         clearMergeProgress();
@@ -983,16 +1055,20 @@ export default function App() {
   }
 
   function clearOutputState() {
+    clearPartialHighlight();
     setOutputText("");
     setOutputBaseline("");
+    setOutputUsage(null);
     setOutputCopied(false);
     setShowDiff(true);
     setOutputPhase("idle");
   }
 
   function startOutputStream() {
+    clearPartialHighlight();
     setOutputText("");
     setOutputBaseline("");
+    setOutputUsage(null);
     setOutputCopied(false);
     setShowDiff(true);
     setOutputPhase("streaming");
@@ -1000,6 +1076,7 @@ export default function App() {
 
   function commitOutput(nextOutput) {
     const normalized = String(nextOutput || "");
+    clearPartialHighlight();
     setOutputText(normalized);
     setOutputBaseline(normalized);
     setOutputCopied(false);
@@ -1008,6 +1085,7 @@ export default function App() {
   }
 
   function handleOutputChange(nextOutput) {
+    clearPartialHighlight();
     setOutputText(nextOutput);
     setOutputCopied(false);
   }
@@ -1017,6 +1095,42 @@ export default function App() {
     copyTextToClipboard(outputText, "Output copied.");
     setOutputCopied(true);
     setTimeout(() => setOutputCopied(false), 1600);
+  }
+
+  function beginGenerationRequest() {
+    activeGenerationControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeGenerationControllerRef.current = controller;
+    activeGenerationIdRef.current += 1;
+    return {
+      generationId: activeGenerationIdRef.current,
+      signal: controller.signal,
+    };
+  }
+
+  function isActiveGeneration(generationId) {
+    return generationId === activeGenerationIdRef.current;
+  }
+
+  function finishGenerationRequest(generationId) {
+    if (!isActiveGeneration(generationId)) return false;
+    activeGenerationControllerRef.current = null;
+    return true;
+  }
+
+  function cancelCurrentGeneration() {
+    if (!requestLoading) return;
+    activeGenerationIdRef.current += 1;
+    activeGenerationControllerRef.current?.abort();
+    activeGenerationControllerRef.current = null;
+    pushProcessStep("Generation canceled. You can retry now.", "warning");
+    setProcessSummary("Generation canceled.");
+    setProcessError("");
+    setProcessNeedsApiKey(false);
+    setStatus("");
+    setLoading(false);
+    setRequestLoading(false);
+    clearOutputState();
   }
 
   function regenerateOutput() {
@@ -1051,9 +1165,12 @@ export default function App() {
 
     setIsPartialStreaming(true);
     setPartialRegenText(selectedText);
+    clearPartialHighlightFade();
+    setPartialHighlight({ rawStart, rawEnd, phase: "pending" });
     // Snapshot before/after slices before any async state changes
     const snapBefore = outputText.slice(0, rawStart);
     const snapAfter = outputText.slice(rawEnd);
+    setOutputText(snapBefore + snapAfter);
     try {
       const confidence = activeProfileConfidence;
       const filteredProfile = filterProfileForContext(
@@ -1066,17 +1183,29 @@ export default function App() {
       const result = await llmStream(
         systemPrompt,
         buildPartialRegenUserPrompt(outputText, selectedText),
-        (_, full) => setOutputText(snapBefore + full + snapAfter),
+        (_, full) => {
+          setOutputText(snapBefore + full + snapAfter);
+          setPartialHighlight({ rawStart, rawEnd: rawStart + full.length, phase: "pending" });
+        },
         computeMaxTokens(selectedText, "partial"),
-        selectedModel,
+        featureModel,
         runtimeConfig,
-        { temperature: 0.7 }
+        {
+          temperature: 0.7,
+          onUsage: (usage) => setOutputUsage(normalizeUsage(usage)),
+        }
       );
       if (!result?.trim()) throw new Error("The model returned an empty replacement.");
-      setOutputText(snapBefore + result.trim() + snapAfter);
+      const finalized = result.trim();
+      setOutputText(snapBefore + finalized + snapAfter);
+      setPartialHighlight({ rawStart, rawEnd: rawStart + finalized.length, phase: "completed" });
+      scheduleCompletedPartialHighlightFade();
     } catch (e) {
-      setError("Partial regen failed: " + getErrorMessage(e));
+      const message = getErrorMessage(e);
+      const issue = classifyRequestIssue(message);
+      setError(`Partial regen failed: ${issue.userMessage || message}`);
       setTimeout(() => setError(""), 4000);
+      clearPartialHighlight();
     } finally {
       setIsPartialStreaming(false);
       setPartialRegenText("");
@@ -1089,6 +1218,7 @@ export default function App() {
     const activeProfile = styles[activeProfileId];
     if (!activeProfile) { setError("Onboard your writing profile first."); return; }
     if (sourceText.trim().length < 20) { setError("Paste some text to humanize (20+ chars)."); return; }
+    const { generationId, signal } = beginGenerationRequest();
     setError(""); setLoading(true); setRequestLoading(true); setStatus("Rewriting in your voice…");
     startProcessLog("Starting rewrite request.", `Mode: humanize via ${selectedModel}`);
     try {
@@ -1109,22 +1239,40 @@ export default function App() {
       const streamRewrite = async (systemPrompt, userPrompt, firstChunkMessage) => {
         startOutputStream();
         let loggedFirstChunk = false;
-        return llmStream(
-          systemPrompt,
-          userPrompt,
-          (_, full) => {
-            if (!loggedFirstChunk) {
-              loggedFirstChunk = true;
-              pushProcessStep(firstChunkMessage, "info");
+        const waitNoticeId = window.setTimeout(() => {
+          if (!loggedFirstChunk && isActiveGeneration(generationId)) {
+            pushProcessStep("Still waiting for the model to start streaming. OpenRouter may be queueing the request.", "warning");
+          }
+        }, STREAM_WAIT_NOTICE_MS);
+        try {
+          return await llmStream(
+            systemPrompt,
+            userPrompt,
+            (_, full) => {
+              if (!loggedFirstChunk) {
+                loggedFirstChunk = true;
+                pushProcessStep(firstChunkMessage, "info");
+              }
+              setOutputText(full);
+              setOutputBaseline(full);
+            },
+            computeMaxTokens(sourceText, "humanize"),
+            selectedModel,
+            { ...runtimeConfig, signal },
+            {
+              ...humanizeOptions,
+              onUsage: (usage) => {
+                const normalized = normalizeUsage(usage);
+                setOutputUsage(normalized);
+                if (normalized?.promptTokens != null) {
+                  setInputUsage({ sourceText, promptTokens: normalized.promptTokens });
+                }
+              },
             }
-            setOutputText(full);
-            setOutputBaseline(full);
-          },
-          computeMaxTokens(sourceText, "humanize"),
-          selectedModel,
-          runtimeConfig,
-          humanizeOptions
-        );
+          );
+        } finally {
+          window.clearTimeout(waitNoticeId);
+        }
       };
 
       pushProcessStep("Preparing prompt and opening model stream.");
@@ -1142,6 +1290,7 @@ export default function App() {
         );
       }
       if (!out.trim()) {
+        if (!isActiveGeneration(generationId)) return;
         pushProcessStep("Model stream ended with no output.", "error");
         const keyStatus = await getApiKeyStatus(runtimeConfig).catch(() => ({ hasKey: true }));
         if (keyStatus && !keyStatus.hasKey) {
@@ -1152,12 +1301,18 @@ export default function App() {
         }
         throw new Error("The model returned an empty response.");
       }
+      if (!isActiveGeneration(generationId)) return;
       commitOutput(out);
       pushProcessStep("Rewrite completed successfully.", "success", `${countWords(out)} words generated`);
       completeProcess("Rewrite completed successfully.");
       setStatus("");
     } catch (e) {
       const message = getErrorMessage(e);
+      const issue = classifyRequestIssue(message);
+      if (signal.aborted || isAbortLikeError(e)) {
+        pushProcessStep("Generation canceled before completion.", "warning");
+        return;
+      }
       if (isMissingApiKeyError(message)) {
         pushProcessStep("OpenRouter API key missing. Opening API key dialog.", "error");
         setApiKeyRequired(true);
@@ -1165,9 +1320,14 @@ export default function App() {
       }
       clearOutputState();
       logRequestFailure("Rewrite request failed.", message);
-      setError("Failed: " + message);
+      setError(issue.userMessage || message);
     }
-    finally { setRequestLoading(false); setLoading(false); }
+    finally {
+      if (finishGenerationRequest(generationId)) {
+        setRequestLoading(false);
+        setLoading(false);
+      }
+    }
   }
 
   // ── Elaborate ──
@@ -1176,6 +1336,7 @@ export default function App() {
     const activeProfile = styles[activeProfileId];
     if (!activeProfile) { setError("Onboard your writing profile first."); return; }
     if (sourceText.trim().length < 10) { setError("Write something to elaborate on."); return; }
+    const { generationId, signal } = beginGenerationRequest();
     setError(""); setLoading(true); setRequestLoading(true); setStatus("Expanding your writing…");
     startProcessLog("Starting expansion request.", `Mode: elaborate via ${selectedModel}`);
     try {
@@ -1192,23 +1353,45 @@ export default function App() {
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
         : "";
-      const out = await llmStream(
-        [basePrompt, feedbackPrompt].filter(Boolean).join("\n\n"),
-        `Elaborate on:\n\n${sourceText}`,
-        (_, full) => {
-          if (!loggedFirstChunk) {
-            loggedFirstChunk = true;
-            pushProcessStep("Model stream connected. Receiving expanded draft.", "info");
-          }
-          setOutputText(full);
-          setOutputBaseline(full);
-        },
-        computeMaxTokens(sourceText, "elaborate", elabDepth),
-        selectedModel,
-        runtimeConfig,
-        { temperature: TEMP_BY_TONE[toneLevel] ?? 0.9, frequency_penalty: 0.15 }
-      );
+      const waitNoticeId = window.setTimeout(() => {
+        if (!loggedFirstChunk && isActiveGeneration(generationId)) {
+          pushProcessStep("Still waiting for the model to start streaming. OpenRouter may be queueing the request.", "warning");
+        }
+      }, STREAM_WAIT_NOTICE_MS);
+      const out = await (async () => {
+        try {
+          return await llmStream(
+            [basePrompt, feedbackPrompt].filter(Boolean).join("\n\n"),
+            `Elaborate on:\n\n${sourceText}`,
+            (_, full) => {
+              if (!loggedFirstChunk) {
+                loggedFirstChunk = true;
+                pushProcessStep("Model stream connected. Receiving expanded draft.", "info");
+              }
+              setOutputText(full);
+              setOutputBaseline(full);
+            },
+            computeMaxTokens(sourceText, "elaborate", elabDepth),
+            selectedModel,
+            { ...runtimeConfig, signal },
+            {
+              temperature: TEMP_BY_TONE[toneLevel] ?? 0.9,
+              frequency_penalty: 0.15,
+              onUsage: (usage) => {
+                const normalized = normalizeUsage(usage);
+                setOutputUsage(normalized);
+                if (normalized?.promptTokens != null) {
+                  setInputUsage({ sourceText, promptTokens: normalized.promptTokens });
+                }
+              },
+            }
+          );
+        } finally {
+          window.clearTimeout(waitNoticeId);
+        }
+      })();
       if (!out.trim()) {
+        if (!isActiveGeneration(generationId)) return;
         pushProcessStep("Model stream ended with no output.", "error");
         const keyStatus = await getApiKeyStatus(runtimeConfig).catch(() => ({ hasKey: true }));
         if (keyStatus && !keyStatus.hasKey) {
@@ -1219,12 +1402,18 @@ export default function App() {
         }
         throw new Error("The model returned an empty response.");
       }
+      if (!isActiveGeneration(generationId)) return;
       commitOutput(out);
       pushProcessStep("Expansion completed successfully.", "success", `${countWords(out)} words generated`);
       completeProcess("Expansion completed successfully.");
       setStatus("");
     } catch (e) {
       const message = getErrorMessage(e);
+      const issue = classifyRequestIssue(message);
+      if (signal.aborted || isAbortLikeError(e)) {
+        pushProcessStep("Generation canceled before completion.", "warning");
+        return;
+      }
       if (isMissingApiKeyError(message)) {
         pushProcessStep("OpenRouter API key missing. Opening API key dialog.", "error");
         setApiKeyRequired(true);
@@ -1232,9 +1421,14 @@ export default function App() {
       }
       clearOutputState();
       logRequestFailure("Expansion request failed.", message);
-      setError("Failed: " + message);
+      setError(issue.userMessage || message);
     }
-    finally { setRequestLoading(false); setLoading(false); }
+    finally {
+      if (finishGenerationRequest(generationId)) {
+        setRequestLoading(false);
+        setLoading(false);
+      }
+    }
   }
 
 
@@ -1243,6 +1437,7 @@ export default function App() {
   const health = computeProfileHealth(activeProfile);
   const activeProfileConfidence = useMemo(() => computeTraitConfidence(activeProfile), [activeProfile]);
   const words = countWords(inputText);
+  const outputWords = countWords(outputText);
 
   const handleInputChange = (val) => {
     inputTextRef.current = val;
@@ -1306,7 +1501,7 @@ export default function App() {
         backupStatus={backupStatus}
         backupLastSavedAt={backupLastSavedAt}
         backupError={backupError}
-        onRetryBackup={() => saveStylesBackupWithRetry(styles)}
+        onRetryBackup={() => saveStylesBackupWithRetry(persistedProfileData)}
         onOpenStyleModal={() => setStyleModalOpen(true)}
         onOpenManagement={() => setManagementOpen(true)}
         onOpenProfileModal={() => setProfileModalOpen(true)}
@@ -1346,8 +1541,6 @@ export default function App() {
                 mode={mode}
                 onModeChange={handleModeChange}
                 loading={requestLoading}
-                progressLabel={requestProgressLabel}
-                progressTone={requestProgressTone}
                 hasStyle={hasProfile}
                 words={words}
                 cliches={cliches}
@@ -1376,6 +1569,9 @@ export default function App() {
                   mode={mode}
                   originalText={inputText}
                   outputText={outputText}
+                  outputWords={outputWords}
+                  inputUsage={inputUsage}
+                  outputUsage={outputUsage}
                   isStreaming={isStreamingOutput}
                   onOutputChange={handleOutputChange}
                   showDiff={showDiff}
@@ -1390,9 +1586,15 @@ export default function App() {
                   onCopy={copyOutput}
                   onRegenerate={regenerateOutput}
                   onRegenerateWithFeedback={regenerateOutputWithFeedback}
+                  onCancelGeneration={cancelCurrentGeneration}
                   cliches={cliches}
                   onPartialRegen={regeneratePartial}
                   isPartialStreaming={isPartialStreaming}
+                  partialHighlight={partialHighlight}
+                  onClearPartialHighlight={clearPartialHighlight}
+                  progressLabel={requestProgressLabel}
+                  progressTone={requestProgressTone}
+                  processSteps={processSteps}
                 />
               </section>
             ) : null}
@@ -1470,6 +1672,9 @@ export default function App() {
         transitionProps={drawerTransitionProps}
       >
       <ManagementPanel
+        featureModel={featureModel}
+        onFeatureModelChange={setFeatureModel}
+        modelOptions={modelOptions}
         themeKey={themeKey}
         onThemeChange={setThemeKey}
         clichesUpdatedAt={clichesUpdatedAt}
@@ -1633,6 +1838,7 @@ export {
   getFormatPresetInstruction,
   getFilledSlots,
   normalizeSampleSlot,
+  normalizeStoredProfileData,
   normalizeStoredStyles,
   splitSentences,
 } from './utils/index.js';

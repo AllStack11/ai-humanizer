@@ -2,6 +2,74 @@ export function countWords(text) {
   return text.trim() ? text.trim().split(/\s+/).length : 0;
 }
 
+const MARKDOWN_IGNORED_CHARS = new Set(["*", "_", "`", "~", "#", ">", "[", "]", "(", ")"]);
+
+function isMarkdownIgnoredChar(char) {
+  return MARKDOWN_IGNORED_CHARS.has(char);
+}
+
+function isWordChar(char) {
+  return /[A-Za-z0-9]/.test(char || "");
+}
+
+export function expandSelectionToWordBoundaries(text, start, end) {
+  const source = String(text || "");
+  const clampedStart = Math.max(0, Math.min(Number(start) || 0, source.length));
+  const clampedEnd = Math.max(clampedStart, Math.min(Number(end) || 0, source.length));
+
+  let nextStart = clampedStart;
+  let nextEnd = clampedEnd;
+
+  while (nextStart > 0 && isWordChar(source[nextStart - 1]) && (nextStart >= source.length || isWordChar(source[nextStart] || ""))) {
+    nextStart -= 1;
+  }
+  while (nextEnd < source.length && isWordChar(source[nextEnd]) && (nextEnd === 0 || isWordChar(source[nextEnd - 1] || ""))) {
+    nextEnd += 1;
+  }
+
+  return { start: nextStart, end: nextEnd, text: source.slice(nextStart, nextEnd) };
+}
+
+export function mapVisibleOffsetToRawOffset(rawText, visibleOffset) {
+  const source = String(rawText || "");
+  const target = Math.max(0, Number(visibleOffset) || 0);
+  if (target === 0) return 0;
+
+  let visibleCount = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    if (!isMarkdownIgnoredChar(source[index])) {
+      visibleCount += 1;
+      if (visibleCount >= target) return index + 1;
+    }
+  }
+
+  return source.length;
+}
+
+export function mapRawOffsetToVisibleOffset(rawText, rawOffset) {
+  const source = String(rawText || "");
+  const target = Math.max(0, Math.min(Number(rawOffset) || 0, source.length));
+
+  let visibleCount = 0;
+  for (let index = 0; index < target; index += 1) {
+    if (!isMarkdownIgnoredChar(source[index])) visibleCount += 1;
+  }
+
+  return visibleCount;
+}
+
+export function estimateTokenCount(text) {
+  const normalized = String(text || "");
+  if (!normalized.trim()) return 0;
+
+  const segments = normalized.match(/[A-Za-z]+(?:'[A-Za-z]+)?|\d+|[^\s]/g) || [];
+  return segments.reduce((total, segment) => {
+    if (/^[A-Za-z]/.test(segment)) return total + Math.max(1, Math.ceil(segment.length / 4));
+    if (/^\d+$/.test(segment)) return total + Math.max(1, Math.ceil(segment.length / 3));
+    return total + 1;
+  }, 0);
+}
+
 function countChars(text) {
   return text.length;
 }

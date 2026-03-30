@@ -1,4 +1,5 @@
 import { Button, Card } from "./AppUI.jsx";
+import { classifyRequestIssue } from "../features/app/helpers.js";
 
 const ROUTE_LABELS = {
   "app:init:start": "App startup started",
@@ -15,6 +16,7 @@ const STATUS_META = {
   ok: { label: "Success", tone: "success" },
   info: { label: "Info", tone: "info" },
   warning: { label: "Warning", tone: "warning" },
+  canceled: { label: "Canceled", tone: "warning" },
   failed: { label: "Failed", tone: "error" },
   error: { label: "Error", tone: "error" },
 };
@@ -53,8 +55,21 @@ function resolveRoute(log) {
 function resolveStatus(log) {
   const raw = typeof log?.status === "string" ? log.status.trim().toLowerCase() : "";
   if (raw) return raw;
+  if (log?.error && classifyRequestIssue(log.error).status === "canceled") return "canceled";
   if (log?.error) return "error";
   return "info";
+}
+
+function resolveIssue(log) {
+  if (log?.errorSummary || log?.errorDetail || log?.userMessage) {
+    return {
+      summary: log.errorSummary || "Request failed.",
+      detail: log.errorDetail || log.error || "",
+      userMessage: log.userMessage || log.error || "",
+      kind: log.errorKind || "request_failed",
+    };
+  }
+  return classifyRequestIssue(log?.error || "");
 }
 
 function resolveModeLabel(log) {
@@ -145,6 +160,7 @@ function DiagnosticsContent({ requestLogs, logsLoading, onRefresh, onClear }) {
             const resolvedRoute = resolveRoute(log);
             const resolvedStatus = resolveStatus(log);
             const statusMeta = getStatusMeta(resolvedStatus);
+            const issue = resolveIssue(log);
             const fallbackId = `${log?.startedAt || "log"}-${resolvedRoute}-${index}`;
 
             return (
@@ -171,6 +187,9 @@ function DiagnosticsContent({ requestLogs, logsLoading, onRefresh, onClear }) {
                 </div>
               </summary>
               <div className="diagnostic-log-detail-grid">
+                {log.error ? <DebugBlock title="Issue summary" content={issue.summary || "(empty)"} danger={resolvedStatus !== "canceled"} /> : null}
+                {log.userMessage || issue.userMessage ? <DebugBlock title="User-facing message" content={log.userMessage || issue.userMessage || "(empty)"} /> : null}
+                {log.errorDetail || issue.detail ? <DebugBlock title="Issue detail" content={log.errorDetail || issue.detail || "(empty)"} danger={resolvedStatus !== "canceled"} /> : null}
                 <DebugBlock title="System prompt" content={log.request?.system || "(empty)"} />
                 <DebugBlock title="User prompt/messages" content={JSON.stringify(log.request?.messages || [], null, 2)} />
                 <DebugBlock title="Usage / tokens" content={JSON.stringify(log.usage || {}, null, 2)} />

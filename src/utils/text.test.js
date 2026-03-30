@@ -8,6 +8,9 @@ import {
   computeRepetitionScore,
   computeSentenceComplexity,
   computeTextMetricSnapshot,
+  expandSelectionToWordBoundaries,
+  mapRawOffsetToVisibleOffset,
+  mapVisibleOffsetToRawOffset,
 } from "./text.js";
 
 describe("text metrics", () => {
@@ -62,5 +65,32 @@ describe("text metrics", () => {
     expect(snapshot).toHaveProperty("passiveVoiceRatio");
     expect(snapshot).toHaveProperty("repetitionScore");
     expect(snapshot).toHaveProperty("concretenessScore");
+  });
+
+  test("expands a partial selection to include the full word on both ends", () => {
+    const expanded = expandSelectionToWordBoundaries("alpha bravo charlie", 2, 9);
+    expect(expanded).toEqual({ start: 0, end: 11, text: "alpha bravo" });
+  });
+
+  test("leaves selections already on word boundaries unchanged", () => {
+    const expanded = expandSelectionToWordBoundaries("alpha bravo", 0, 5);
+    expect(expanded).toEqual({ start: 0, end: 5, text: "alpha" });
+  });
+
+  test("does not absorb punctuation or whitespace when expanding", () => {
+    const expanded = expandSelectionToWordBoundaries("alpha, bravo", 8, 10);
+    expect(expanded).toEqual({ start: 7, end: 12, text: "bravo" });
+  });
+
+  test("maps visible offsets to raw markdown offsets", () => {
+    const raw = "**alpha** bravo";
+    expect(mapVisibleOffsetToRawOffset(raw, 5)).toBe(7);
+    expect(mapVisibleOffsetToRawOffset(raw, 11)).toBe(raw.length);
+  });
+
+  test("maps raw markdown offsets back to visible offsets", () => {
+    const raw = "**alpha** bravo";
+    expect(mapRawOffsetToVisibleOffset(raw, 9)).toBe(5);
+    expect(mapRawOffsetToVisibleOffset(raw, raw.length)).toBe(11);
   });
 });

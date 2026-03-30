@@ -5,6 +5,9 @@ import { APP_THEME_OPTIONS } from "../constants/index.js";
 import { isTauriRuntime } from "../lib/tauri.js";
 
 export default function ManagementPanel({
+  featureModel,
+  onFeatureModelChange,
+  modelOptions,
   themeKey,
   onThemeChange,
   clichesUpdatedAt,
@@ -27,6 +30,22 @@ export default function ManagementPanel({
 
   return (
     <div className="panel-grid controls-panel">
+      <Card className="app-card">
+        <Card.Content className="panel-grid p-3">
+          <label className="panel-title">
+            Feature Model
+          </label>
+          <NativeSelect
+            aria-label="Feature model"
+            value={featureModel}
+            onChange={(e) => onFeatureModelChange(e.target.value)}
+            data={(modelOptions || []).map((model) => ({ value: model.value, label: model.label }))}
+            className="app-select-wrap"
+          />
+          <Text className="text-mono" size="xs">Used for profile generation and highlighted regeneration.</Text>
+        </Card.Content>
+      </Card>
+
       <Card className="app-card">
         <Card.Content className="panel-grid p-3">
           <label className="panel-title">

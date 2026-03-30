@@ -1,7 +1,6 @@
 import {
   Badge,
   Button as MantineButton,
-  Loader,
   Paper,
   Switch as MantineSwitch,
   TextInput,
@@ -151,6 +150,11 @@ export function Switch({ isSelected, onChange, className = "", ...props }) {
   );
 }
 
-export function Spinner({ className = "" }) {
-  return <Loader className={cx("ui-spinner", className)} color="var(--accent)" />;
+export function Spinner({ className = "", size = "md" }) {
+  return (
+    <span
+      className={cx("ui-spinner", `ui-spinner--${size}`, className)}
+      aria-hidden="true"
+    />
+  );
 }
