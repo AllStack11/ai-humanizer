@@ -939,8 +939,9 @@ export default function App() {
         await pushMergeProgressStep("Sending merge request to model.", 45 + (attempt * 16), { detail: attemptLabel });
         pushProcessStep("Sending profile request to model.", "info", `Attempt ${attempt + 1} via ${featureModel}`);
         const trainingOptions = attempt === 0 ? { response_format: { type: "json_object" } } : {};
+        let raw = "";
         try {
-          const raw = await llm(plan.systemPrompt, plan.userPrompt, plan.maxTokens, featureModel, runtimeConfig, trainingOptions);
+          raw = await llm(plan.systemPrompt, plan.userPrompt, plan.maxTokens, featureModel, runtimeConfig, trainingOptions);
           await pushMergeProgressStep("Received model response. Validating profile JSON.", 58 + (attempt * 16), { detail: attemptLabel });
           const parsedProfile = parseJsonFromModelOutput(raw);
           profile = normalizeProfileObject(parsedProfile);
@@ -986,7 +987,6 @@ export default function App() {
             continue;
           }
 
-          const raw = typeof attemptErr?.rawResponse === "string" ? attemptErr.rawResponse : "";
           const parsedPayload = (() => {
             try {
               return parseJsonFromModelOutput(raw);

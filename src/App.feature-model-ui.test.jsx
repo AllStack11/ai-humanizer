@@ -169,6 +169,36 @@ describe("Feature model UI and persistence", () => {
     expect(profileCalls.every(([, args]) => args.payload.model === "aion-labs/aion-2.0")).toBe(true);
   });
 
+  test("retries profile creation once after a transient request failure", async () => {
+    let profileAttempt = 0;
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") {
+        profileAttempt += 1;
+        if (profileAttempt === 1) throw new Error("Failed to reach OpenRouter: connection refused");
+        return { content: [{ text: '{"tone":"balanced"}' }] };
+      }
+      if (command === "openrouter_chat_stream") return { ok: true };
+      return { ok: true };
+    });
+
+    renderWithMantine(<App />);
+    await createProfileFromOnboarding(
+      "This is a long enough writing sample to create a profile and verify retry behavior after one transient failure."
+    );
+
+    await waitFor(() => {
+      expect(getFirstStoredProfileRecord()?.profile).toEqual({ tone: "balanced" });
+    }, { timeout: 9000 });
+
+    const profileCalls = invokeMock.mock.calls.filter(([command]) => command === "openrouter_chat");
+    expect(profileCalls).toHaveLength(2);
+  }, 15000);
+
   test("shows a handled error and does not persist when profile creation returns a JSON array", async () => {
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "has_api_key") return true;

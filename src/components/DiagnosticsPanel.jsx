@@ -10,6 +10,7 @@ const ROUTE_LABELS = {
   "profile:reset": "Profile reset",
   "profile:train:json_parse_failed": "Profile training parse failed",
   "profile:train:invalid_profile_shape": "Profile training invalid shape",
+  "profile:train:request_failed": "Profile training request failed",
 };
 
 const STATUS_META = {
