@@ -239,6 +239,31 @@ export default function App() {
   }
 
 
+  // Listen for storage changes from other tabs to keep profiles in sync
+  useEffect(() => {
+    const handleStorageChange = async (e) => {
+      if (!e.key) return;
+      
+      // Identify the keys that should trigger a state refresh
+      const isStyleKey = e.key.includes("styles-v3");
+      const isCustomProfileKey = e.key.includes(CUSTOM_PROFILES_KEY);
+      
+      if (isStyleKey) {
+        const nextStyles = await load("styles-v3");
+        // Update state but don't re-save to avoid loops
+        if (nextStyles) setStyles(normalizeStoredStyles(nextStyles));
+      }
+      
+      if (isCustomProfileKey) {
+        const nextCustom = await load(CUSTOM_PROFILES_KEY);
+        if (Array.isArray(nextCustom)) setCustomProfiles(nextCustom);
+      }
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
+
   // Load persisted data
   useEffect(() => {
     (async () => {
@@ -387,6 +412,20 @@ export default function App() {
     const DELAYS = [1000, 2000, 4000];
     setBackupStatus("saving");
     setBackupError("");
+
+    // Web: backup is a redundant localStorage key — no retry needed
+    if (!isTauriRuntime()) {
+      try {
+        await saveStylesBackupRaw(stylesData);
+        setBackupStatus("ok");
+        setBackupLastSavedAt(new Date());
+      } catch (err) {
+        setBackupStatus("error");
+        setBackupError("Local backup failed");
+      }
+      return;
+    }
+
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) {
         setBackupStatus("retrying");

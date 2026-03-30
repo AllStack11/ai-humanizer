@@ -64,7 +64,16 @@ export async function save(key, val) {
 }
 
 export async function loadStylesBackup() {
-  if (!isTauriRuntime()) return null;
+  if (!isTauriRuntime()) {
+    // Web "backup" is just the secondary localStorage key for redundancy
+    try {
+      const scoped = await resolveStorageKey("styles-v3-backup");
+      const r = localStorage.getItem(scoped);
+      return r ? JSON.parse(r) : null;
+    } catch {
+      return null;
+    }
+  }
   try {
     const data = await tauriInvoke("get_styles_backup");
     return data?.styles && typeof data.styles === "object" && !Array.isArray(data.styles) ? data.styles : null;
@@ -74,7 +83,16 @@ export async function loadStylesBackup() {
 }
 
 export async function saveStylesBackupRaw(stylesData) {
-  if (!isTauriRuntime()) throw new Error("Desktop runtime required.");
+  if (!isTauriRuntime()) {
+    // On web, we "back up" to a secondary key to guard against single-key corruption
+    try {
+      const scoped = await resolveStorageKey("styles-v3-backup");
+      localStorage.setItem(scoped, JSON.stringify(stylesData));
+      return { ok: true };
+    } catch (e) {
+      throw new Error(`Web backup failed: ${e.message}`);
+    }
+  }
   const data = await tauriInvoke("save_styles_backup", { styles: stylesData });
   return data;
 }
