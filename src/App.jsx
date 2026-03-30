@@ -913,7 +913,7 @@ export default function App() {
           [activeProfileId]: {
             id: activeProfileId,
             name: profileName,
-            profile,
+            profile: existing ? { ...existing.profile, ...profile } : profile,
             sampleEntries,
             samples: sampleEntries.map(sample => sample.text),
             sampleCount: sampleEntries.length,

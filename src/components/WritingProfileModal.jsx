@@ -73,6 +73,80 @@ export default function WritingProfileModal({ profile, health, profileLabel, has
         </Card>
       ) : null}
 
+      {onUpdateMeta && (
+        <div>
+          <h3 className="text-mono" style={{ margin: "0 0 8px", fontSize: 12 }}>Profile Context</h3>
+          <Card className="app-card" radius="lg">
+            <Card.Content className="panel-grid p-3">
+              <div>
+                <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Writing Goals</label>
+                <div className="toolbar-row" style={{ flexWrap: "wrap", gap: 6 }}>
+                  {PROFILE_GOAL_OPTIONS.map(({ value, label }) => {
+                    const active = meta?.goals?.includes(value);
+                    return (
+                      <button
+                        key={value}
+                        className={`profile-meta-chip${active ? " profile-meta-chip--active" : ""}`}
+                        onClick={() => {
+                          const current = meta?.goals || [];
+                          onUpdateMeta({ goals: active ? current.filter(g => g !== value) : [...current, value] });
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Content Domains</label>
+                <div className="toolbar-row" style={{ flexWrap: "wrap", gap: 6 }}>
+                  {PROFILE_DOMAIN_OPTIONS.map(({ value, label }) => {
+                    const active = meta?.domains?.includes(value);
+                    return (
+                      <button
+                        key={value}
+                        className={`profile-meta-chip${active ? " profile-meta-chip--active" : ""}`}
+                        onClick={() => {
+                          const current = meta?.domains || [];
+                          onUpdateMeta({ domains: active ? current.filter(d => d !== value) : [...current, value] });
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Target Audience</label>
+                <input
+                  className="app-input"
+                  type="text"
+                  key={meta?.audience}
+                  defaultValue={meta?.audience || ""}
+                  placeholder="e.g. tech professionals, general public"
+                  onBlur={(e) => onUpdateMeta({ audience: e.target.value })}
+                  style={{ width: "100%", boxSizing: "border-box" }}
+                />
+              </div>
+              <div>
+                <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Notes</label>
+                <textarea
+                  className="app-input"
+                  key={meta?.notes}
+                  defaultValue={meta?.notes || ""}
+                  placeholder="Personal notes about this profile (not sent to AI)"
+                  rows={2}
+                  onBlur={(e) => onUpdateMeta({ notes: e.target.value })}
+                  style={{ width: "100%", boxSizing: "border-box", resize: "vertical" }}
+                />
+              </div>
+            </Card.Content>
+          </Card>
+        </div>
+      )}
+
       {!hasProfile ? (
         <Card className="app-card" radius="lg">
           <Card.Content className="p-3" style={{ textAlign: "center", padding: "32px 16px" }}>
@@ -156,80 +230,6 @@ export default function WritingProfileModal({ profile, health, profileLabel, has
             </div>
           )}
         </>
-      )}
-
-      {onUpdateMeta && (
-        <div>
-          <h3 className="text-mono" style={{ margin: "0 0 8px", fontSize: 12 }}>Profile Context</h3>
-          <Card className="app-card" radius="lg">
-            <Card.Content className="panel-grid p-3">
-              <div>
-                <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Writing Goals</label>
-                <div className="toolbar-row" style={{ flexWrap: "wrap", gap: 6 }}>
-                  {PROFILE_GOAL_OPTIONS.map(({ value, label }) => {
-                    const active = meta?.goals?.includes(value);
-                    return (
-                      <button
-                        key={value}
-                        className={`profile-meta-chip${active ? " profile-meta-chip--active" : ""}`}
-                        onClick={() => {
-                          const current = meta?.goals || [];
-                          onUpdateMeta({ goals: active ? current.filter(g => g !== value) : [...current, value] });
-                        }}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div>
-                <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Content Domains</label>
-                <div className="toolbar-row" style={{ flexWrap: "wrap", gap: 6 }}>
-                  {PROFILE_DOMAIN_OPTIONS.map(({ value, label }) => {
-                    const active = meta?.domains?.includes(value);
-                    return (
-                      <button
-                        key={value}
-                        className={`profile-meta-chip${active ? " profile-meta-chip--active" : ""}`}
-                        onClick={() => {
-                          const current = meta?.domains || [];
-                          onUpdateMeta({ domains: active ? current.filter(d => d !== value) : [...current, value] });
-                        }}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div>
-                <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Target Audience</label>
-                <input
-                  className="app-input"
-                  type="text"
-                  key={meta?.audience}
-                  defaultValue={meta?.audience || ""}
-                  placeholder="e.g. tech professionals, general public"
-                  onBlur={(e) => onUpdateMeta({ audience: e.target.value })}
-                  style={{ width: "100%", boxSizing: "border-box" }}
-                />
-              </div>
-              <div>
-                <label className="text-mono" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>Notes</label>
-                <textarea
-                  className="app-input"
-                  key={meta?.notes}
-                  defaultValue={meta?.notes || ""}
-                  placeholder="Personal notes about this profile (not sent to AI)"
-                  rows={2}
-                  onBlur={(e) => onUpdateMeta({ notes: e.target.value })}
-                  style={{ width: "100%", boxSizing: "border-box", resize: "vertical" }}
-                />
-              </div>
-            </Card.Content>
-          </Card>
-        </div>
       )}
     </Modal>
   );

@@ -168,7 +168,10 @@ async function fetchWithApiKey(url, payload, runtime = {}) {
 }
 
 export async function llm(system, user, maxTokens = 2400, model = MODEL_OPTIONS[0].value, runtime = {}, options = {}) {
-  const payload = { max_tokens: maxTokens, model, system, messages: [{ role: "user", content: user }] };
+  const builtMessages = [];
+  if (system && system.trim()) builtMessages.push({ role: "system", content: system.trim() });
+  builtMessages.push({ role: "user", content: user });
+  const payload = { max_tokens: maxTokens, model, messages: builtMessages };
   if (typeof options.temperature === "number") payload.temperature = options.temperature;
   if (typeof options.frequency_penalty === "number") payload.frequency_penalty = options.frequency_penalty;
   if (options.response_format && typeof options.response_format === "object") payload.response_format = options.response_format;
@@ -212,12 +215,14 @@ export async function llm(system, user, maxTokens = 2400, model = MODEL_OPTIONS[
 }
 
 export async function llmStream(system, user, onChunk, maxTokens = 2400, model = MODEL_OPTIONS[0].value, runtime = {}, options = {}) {
+  const builtStreamMessages = [];
+  if (system && system.trim()) builtStreamMessages.push({ role: "system", content: system.trim() });
+  builtStreamMessages.push({ role: "user", content: user });
   const streamPayload = {
     max_tokens: maxTokens,
     model,
-    system,
     stream: true,
-    messages: [{ role: "user", content: user }],
+    messages: builtStreamMessages,
   };
   if (typeof options.temperature === "number") streamPayload.temperature = options.temperature;
   if (typeof options.frequency_penalty === "number") streamPayload.frequency_penalty = options.frequency_penalty;
