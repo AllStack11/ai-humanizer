@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-03-29
+Last updated: 2026-03-30
 
 Our focus is currently on maintaining stability and improving the core humanization engine.
 
@@ -10,6 +10,7 @@ We have many exciting ideas for the future, but we're keeping our upcoming list 
 
 - **Continuous Improvement**: Ongoing refinements to the rewriting logic and user interface.
 - **Stability & Performance**: Ensuring a smooth experience across both web and desktop versions.
+- **CLI Support**: Exploring a command-line workflow for scripting, automation, and fast text humanization outside the UI.
 
 ## ✨ We’re Open to Ideas!
 
