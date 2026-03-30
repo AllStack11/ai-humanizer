@@ -9,6 +9,7 @@ const ROUTE_LABELS = {
   "app:profile:active_changed": "Active profile changed",
   "profile:reset": "Profile reset",
   "profile:train:json_parse_failed": "Profile training parse failed",
+  "profile:train:invalid_profile_shape": "Profile training invalid shape",
 };
 
 const STATUS_META = {

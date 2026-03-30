@@ -20,10 +20,11 @@ const PROFILE_TRAITS = [
 export default function WritingProfileModal({ profile, health, profileLabel, hasProfile, confidence, meta, onUpdateMeta, onUpdateProfile, onClose }) {
   const [editingTrait, setEditingTrait] = useState(null);
   const [draftValue, setDraftValue]     = useState("");
+  const safeProfile = profile && typeof profile === "object" && !Array.isArray(profile) ? profile : null;
 
   function startEdit(key) {
     setEditingTrait(key);
-    setDraftValue(profile[key] || "");
+    setDraftValue(safeProfile?.[key] || "");
   }
 
   function saveTrait() {
@@ -83,18 +84,18 @@ export default function WritingProfileModal({ profile, health, profileLabel, has
         </Card>
       ) : (
         <>
-          {profile?.summary && (
+          {safeProfile?.summary && (
             <div className="debug-block" style={{ borderRadius: 12, overflow: "hidden" }}>
               <p className="panel-title" style={{ marginBottom: 6 }}>Summary</p>
               <p className="debug-block-content" style={{ margin: 0, fontSize: 13, lineHeight: 1.7 }}>
-                {profile.summary}
+                {safeProfile.summary}
               </p>
             </div>
           )}
 
-          {profile && (
+          {safeProfile && (
             <div className="diagnostic-log-detail-grid">
-              {PROFILE_TRAITS.filter(([, key]) => profile[key]).map(([label, key]) => {
+              {PROFILE_TRAITS.filter(([, key]) => safeProfile[key]).map(([label, key]) => {
                 const isEditing = editingTrait === key;
                 return (
                   <div key={key} className="debug-block">
@@ -148,7 +149,7 @@ export default function WritingProfileModal({ profile, health, profileLabel, has
                         style={{ width: "100%", boxSizing: "border-box", resize: "vertical", margin: 0, overflowY: "auto" }}
                       />
                     ) : (
-                      <p className="debug-block-content" style={{ margin: 0 }}>{profile[key]}</p>
+                      <p className="debug-block-content" style={{ margin: 0 }}>{safeProfile[key]}</p>
                     )}
                   </div>
                 );

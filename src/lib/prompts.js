@@ -21,6 +21,7 @@ function camelToLabel(key) {
 }
 
 export function renderProfileAsProse(profile) {
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return "";
   return Object.entries(profile)
     .filter(([, v]) => v && typeof v === "string")
     .map(([k, v]) => `- ${camelToLabel(k)}: ${v}`)

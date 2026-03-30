@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseJsonFromModelOutput } from "./helpers.js";
+import { isPlainObject, normalizeProfileObject, parseJsonFromModelOutput } from "./helpers.js";
 
 describe("parseJsonFromModelOutput", () => {
   it("parses clean JSON objects", () => {
@@ -58,5 +58,41 @@ describe("parseJsonFromModelOutput", () => {
   it("handles the specific case from the task error (Unexpected token '#')", () => {
     const input = '# Voice Profile Analysis\n\n```json\n{"tone": "formal"}\n```';
     expect(parseJsonFromModelOutput(input)).toEqual({ tone: "formal" });
+  });
+});
+
+describe("profile object validation", () => {
+  it("identifies plain objects", () => {
+    expect(isPlainObject({ tone: "balanced" })).toBe(true);
+    expect(isPlainObject(Object.create(null))).toBe(true);
+    expect(isPlainObject(null)).toBe(false);
+    expect(isPlainObject(["tone"])).toBe(false);
+    expect(isPlainObject("tone")).toBe(false);
+  });
+
+  it("rejects non-object profile payloads", () => {
+    expect(() => normalizeProfileObject(null)).toThrow("Model returned invalid profile structure.");
+    expect(() => normalizeProfileObject(["tone"])).toThrow("Model returned invalid profile structure.");
+    expect(() => normalizeProfileObject("tone")).toThrow("Model returned invalid profile structure.");
+  });
+
+  it("rejects empty profile objects", () => {
+    expect(() => normalizeProfileObject({})).toThrow("Model returned invalid profile structure.");
+    expect(() => normalizeProfileObject({ tone: "", summary: "   " })).toThrow("Model returned invalid profile structure.");
+  });
+
+  it("keeps only trimmed string fields", () => {
+    expect(
+      normalizeProfileObject({
+        tone: " balanced ",
+        sampleCount: 4,
+        nested: { bad: true },
+        humor: " dry ",
+        summary: "",
+      })
+    ).toEqual({
+      tone: "balanced",
+      humor: "dry",
+    });
   });
 });

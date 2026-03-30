@@ -195,6 +195,16 @@ export function classifyRequestIssue(message) {
     };
   }
 
+  if (normalized.includes("invalid profile structure")) {
+    return {
+      kind: "invalid_profile_structure",
+      status: "error",
+      summary: "Provider returned an invalid profile.",
+      detail: "The model responded with JSON, but it was not a usable profile object.",
+      userMessage: "The model returned an invalid profile structure. Please try again.",
+    };
+  }
+
   if (normalized.includes("empty response")) {
     return {
       kind: "empty_response",
@@ -279,6 +289,28 @@ export function parseJsonFromModelOutput(raw) {
   }
 
   throw new Error("Could not extract a valid JSON object or array from the model response.");
+}
+
+export function isPlainObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+export function normalizeProfileObject(rawProfile) {
+  if (!isPlainObject(rawProfile)) {
+    throw new Error("Model returned invalid profile structure.");
+  }
+
+  const normalizedEntries = Object.entries(rawProfile)
+    .filter(([, value]) => typeof value === "string" && value.trim())
+    .map(([key, value]) => [key, value.trim()]);
+
+  if (!normalizedEntries.length) {
+    throw new Error("Model returned invalid profile structure.");
+  }
+
+  return Object.fromEntries(normalizedEntries);
 }
 
 export function dedupeSampleEntries(entries) {

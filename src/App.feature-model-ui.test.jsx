@@ -29,6 +29,25 @@ function setStoredProfileData(styles, customModels = []) {
   localStorage.setItem("styles-v3", JSON.stringify({ styles, customModels }));
 }
 
+function readStoredProfileData() {
+  const raw = localStorage.getItem("styles-v3") || localStorage.getItem("vh:web:styles-v3") || "{}";
+  return JSON.parse(raw);
+}
+
+function getFirstStoredProfileRecord() {
+  const stored = readStoredProfileData();
+  return Object.values(stored.styles || {})[0] || null;
+}
+
+async function createProfileFromOnboarding(sampleText) {
+  fireEvent.click(await screen.findByRole("button", { name: "Start onboarding" }));
+  fireEvent.change(screen.getByPlaceholderText("Paste writing snippets. Each paste is added as one style piece."), {
+    target: { value: sampleText },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add to style pool" }));
+  fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+}
+
 describe("Feature model UI and persistence", () => {
   let streamListener = null;
 
@@ -137,12 +156,9 @@ describe("Feature model UI and persistence", () => {
 
     renderWithMantine(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Start onboarding" }));
-    fireEvent.change(screen.getByPlaceholderText("Paste writing snippets. Each paste is added as one style piece."), {
-      target: { value: "This is a long enough writing sample to create a profile and verify model routing in onboarding." },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add to style pool" }));
-    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+    await createProfileFromOnboarding(
+      "This is a long enough writing sample to create a profile and verify model routing in onboarding."
+    );
 
     await waitFor(() => {
       const calls = invokeMock.mock.calls.filter(([command]) => command === "openrouter_chat");
@@ -151,6 +167,92 @@ describe("Feature model UI and persistence", () => {
 
     const profileCalls = invokeMock.mock.calls.filter(([command]) => command === "openrouter_chat");
     expect(profileCalls.every(([, args]) => args.payload.model === "aion-labs/aion-2.0")).toBe(true);
+  });
+
+  test("shows a handled error and does not persist when profile creation returns a JSON array", async () => {
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") return { content: [{ text: '["tone","balanced"]' }] };
+      if (command === "openrouter_chat_stream") return { ok: true };
+      return { ok: true };
+    });
+
+    renderWithMantine(<App />);
+    await createProfileFromOnboarding(
+      "This is a long enough writing sample to trigger profile creation and exercise invalid array handling."
+    );
+
+    expect(await screen.findByRole("alert", {}, { timeout: 9000 })).toHaveTextContent("The model returned an invalid profile structure. Please try again.");
+    expect(getFirstStoredProfileRecord()).toBeNull();
+  }, 15000);
+
+  test("shows a handled error and does not persist when profile creation returns a JSON string", async () => {
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") return { content: [{ text: '"not-a-profile"' }] };
+      if (command === "openrouter_chat_stream") return { ok: true };
+      return { ok: true };
+    });
+
+    renderWithMantine(<App />);
+    await createProfileFromOnboarding(
+      "This is a long enough writing sample to trigger profile creation and exercise invalid string handling."
+    );
+
+    expect(await screen.findByRole("alert", {}, { timeout: 9000 })).toHaveTextContent("The model returned an invalid profile structure. Please try again.");
+    expect(getFirstStoredProfileRecord()).toBeNull();
+  }, 15000);
+
+  test("normalizes mixed-value profile objects before persisting them", async () => {
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") {
+        return {
+          content: [{
+            text: '{"tone":"balanced","summary":"steady and direct","sampleCount":3,"nested":{"bad":true},"humor":"dry"}',
+          }],
+        };
+      }
+      if (command === "openrouter_chat_stream") return { ok: true };
+      return { ok: true };
+    });
+
+    renderWithMantine(<App />);
+    await createProfileFromOnboarding(
+      "This is a long enough writing sample to create a profile and verify mixed profile payload normalization."
+    );
+
+    await waitFor(() => {
+      expect(getFirstStoredProfileRecord()?.profile).toEqual({
+        tone: "balanced",
+        summary: "steady and direct",
+        humor: "dry",
+      });
+    }, { timeout: 9000 });
+  });
+
+  test("persists a valid first-time profile and keeps the happy path working", async () => {
+    renderWithMantine(<App />);
+    await createProfileFromOnboarding(
+      "This is a long enough writing sample to create a valid first-time profile and verify the onboarding happy path."
+    );
+
+    await waitFor(() => {
+      expect(getFirstStoredProfileRecord()?.profile).toEqual({ tone: "balanced" });
+      expect(getFirstStoredProfileRecord()?.sampleCount).toBe(1);
+    }, { timeout: 9000 });
   });
 
   test("falls back both model selections when removing a custom model", async () => {

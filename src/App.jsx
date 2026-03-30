@@ -25,6 +25,8 @@ import {
   getErrorMessage,
   isMissingApiKeyError,
   isAbortLikeError,
+  isPlainObject,
+  normalizeProfileObject,
   parseJsonFromModelOutput,
 } from "./features/app/helpers.js";
 import {
@@ -930,29 +932,80 @@ export default function App() {
       ];
 
       let profile = null;
-      let lastParseError = null;
+      let lastProfileError = null;
       for (let attempt = 0; attempt < attempts.length; attempt += 1) {
         const plan = attempts[attempt];
         const attemptLabel = `Attempt ${attempt + 1}/${attempts.length} via ${featureModel}`;
         await pushMergeProgressStep("Sending merge request to model.", 45 + (attempt * 16), { detail: attemptLabel });
         pushProcessStep("Sending profile request to model.", "info", `Attempt ${attempt + 1} via ${featureModel}`);
         const trainingOptions = attempt === 0 ? { response_format: { type: "json_object" } } : {};
-        const raw = await llm(plan.systemPrompt, plan.userPrompt, plan.maxTokens, featureModel, runtimeConfig, trainingOptions);
-        await pushMergeProgressStep("Received model response. Validating profile JSON.", 58 + (attempt * 16), { detail: attemptLabel });
         try {
-          profile = parseJsonFromModelOutput(raw);
+          const raw = await llm(plan.systemPrompt, plan.userPrompt, plan.maxTokens, featureModel, runtimeConfig, trainingOptions);
+          await pushMergeProgressStep("Received model response. Validating profile JSON.", 58 + (attempt * 16), { detail: attemptLabel });
+          const parsedProfile = parseJsonFromModelOutput(raw);
+          profile = normalizeProfileObject(parsedProfile);
           await pushMergeProgressStep("Profile JSON parsed successfully.", 74, { level: "success" });
           pushProcessStep("Profile response parsed successfully.", "success");
           break;
-        } catch (parseErr) {
-          lastParseError = parseErr;
+        } catch (attemptErr) {
+          lastProfileError = attemptErr;
+          const issue = classifyRequestIssue(getErrorMessage(attemptErr));
+          const isRequestFailure = issue.kind !== "parse" && issue.kind !== "invalid_profile_structure";
+
+          if (isRequestFailure) {
+            await pushMergeProgressStep(
+              attempt < attempts.length - 1
+                ? "Profile request failed. Retrying with a fallback attempt."
+                : "Profile request failed.",
+              64 + (attempt * 10),
+              {
+                level: "warning",
+                detail: `${attemptLabel} · ${issue.summary}`,
+              }
+            );
+            pushProcessStep(
+              attempt < attempts.length - 1
+                ? "Profile request failed. Retrying."
+                : "Profile request failed.",
+              attempt < attempts.length - 1 ? "warning" : "error",
+              issue.userMessage || getErrorMessage(attemptErr)
+            );
+            logDiagnosticEvent(
+              "profile:train:request_failed",
+              {
+                attempt: attempt + 1,
+                mode: existing ? "merge" : "analyze",
+                model: featureModel,
+                maxTokens: plan.maxTokens,
+                errorKind: issue.kind,
+                errorSummary: issue.summary,
+              },
+              "failed",
+              { error: getErrorMessage(attemptErr) }
+            ).catch(() => {});
+            continue;
+          }
+
+          const raw = typeof attemptErr?.rawResponse === "string" ? attemptErr.rawResponse : "";
+          const parsedPayload = (() => {
+            try {
+              return parseJsonFromModelOutput(raw);
+            } catch {
+              return null;
+            }
+          })();
+          const invalidShape = parsedPayload !== null;
           await pushMergeProgressStep("Response parse failed. Preparing retry with stricter JSON constraints.", 64 + (attempt * 10), {
             level: "warning",
             detail: attemptLabel,
           });
-          pushProcessStep("Model response was not valid profile JSON.", "warning", `Attempt ${attempt + 1} failed parsing`);
+          pushProcessStep(
+            invalidShape ? "Model response had an invalid profile structure." : "Model response was not valid profile JSON.",
+            "warning",
+            `Attempt ${attempt + 1} failed validation`
+          );
           logDiagnosticEvent(
-            "profile:train:json_parse_failed",
+            invalidShape ? "profile:train:invalid_profile_shape" : "profile:train:json_parse_failed",
             {
               attempt: attempt + 1,
               mode: existing ? "merge" : "analyze",
@@ -960,15 +1013,22 @@ export default function App() {
               maxTokens: plan.maxTokens,
               responseChars: String(raw || "").length,
               responseTail: String(raw || "").slice(-180),
+              parsedType: parsedPayload === null
+                ? "unparsed"
+                : Array.isArray(parsedPayload)
+                  ? "array"
+                  : typeof parsedPayload,
+              parsedKeys: isPlainObject(parsedPayload) ? Object.keys(parsedPayload).slice(0, 20) : [],
+              parsedPreview: parsedPayload === null ? "" : JSON.stringify(parsedPayload).slice(0, 240),
             },
             "failed",
-            { error: getErrorMessage(parseErr) }
+            { error: getErrorMessage(attemptErr) }
           ).catch(() => {});
         }
       }
 
       if (!profile) {
-        throw (lastParseError || new Error("Failed to parse profile JSON from model response."));
+        throw (lastProfileError || new Error("Failed to create profile from model response."));
       }
 
       await pushMergeProgressStep("Applying merged profile and sample dedupe rules.", 86);
@@ -979,13 +1039,16 @@ export default function App() {
           : [];
         const sampleEntries = dedupeSampleEntries([...existingSamples, ...filled]);
         const createdAt = existingProfile?.createdAt || new Date().toISOString();
+        const mergedProfile = existing && isPlainObject(existing.profile)
+          ? { ...existing.profile, ...profile }
+          : profile;
 
         return {
           ...prev,
           [activeProfileId]: {
             id: activeProfileId,
             name: profileName,
-            profile: existing ? { ...existing.profile, ...profile } : profile,
+            profile: mergedProfile,
             sampleEntries,
             sampleCount: sampleEntries.length,
             createdAt,

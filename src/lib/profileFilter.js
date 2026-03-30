@@ -47,7 +47,7 @@ const PROFILE_FILTER_RULES = [
 ];
 
 export function filterProfileForContext(profile, context) {
-  if (!profile) return profile;
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return null;
   const suppressed = new Set();
   for (const rule of PROFILE_FILTER_RULES) {
     if (rule.when(context)) rule.suppress.forEach((f) => suppressed.add(f));
@@ -57,9 +57,11 @@ export function filterProfileForContext(profile, context) {
 }
 
 export function describeProfileFilter(profile, filteredProfile) {
-  if (!profile) return { message: "No profile.", detail: "" };
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return { message: "No profile.", detail: "" };
   const allFields = Object.keys(profile);
-  const sentFields = Object.keys(filteredProfile);
+  const sentFields = filteredProfile && typeof filteredProfile === "object" && !Array.isArray(filteredProfile)
+    ? Object.keys(filteredProfile)
+    : [];
   const suppressedFields = allFields.filter((f) => !sentFields.includes(f));
   const message = suppressedFields.length
     ? `Profile filtered: ${suppressedFields.length} field${suppressedFields.length > 1 ? "s" : ""} suppressed.`
