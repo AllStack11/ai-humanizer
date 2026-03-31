@@ -105,6 +105,11 @@ export function normalizeCustomModels(rawCustomModels) {
 
 export function normalizeStoredStyles(rawStyles, legacyCustomProfiles = null) {
   const normalized = {};
+
+  PROFILE_OPTIONS.forEach((profile) => {
+    normalized[profile.id] = createProfileRecord(profile.id, {}, legacyCustomProfiles);
+  });
+
   const allEntries = Object.entries(rawStyles || {});
   for (const [id, style] of allEntries) {
     normalized[id] = createProfileRecord(id, style || {}, legacyCustomProfiles);

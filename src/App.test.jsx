@@ -74,6 +74,35 @@ describe("App utility functions", () => {
     expect(normalized.personal.sampleCount).toBe(1);
   });
 
+  test("normalizeStoredStyles materializes built-in profiles with the same record shape", () => {
+    const normalized = normalizeStoredStyles({});
+
+    expect(normalized.personal).toMatchObject({
+      id: "personal",
+      name: "Personal",
+      isCustom: false,
+      profile: null,
+      sampleEntries: [],
+      sampleCount: 0,
+    });
+    expect(normalized.work).toMatchObject({
+      id: "work",
+      name: "Work",
+      isCustom: false,
+      profile: null,
+      sampleEntries: [],
+      sampleCount: 0,
+    });
+    expect(normalized.social).toMatchObject({
+      id: "social",
+      name: "Social Media",
+      isCustom: false,
+      profile: null,
+      sampleEntries: [],
+      sampleCount: 0,
+    });
+  });
+
   test("normalizeStoredStyles resolves legacy question sample type labels", () => {
     const normalized = normalizeStoredStyles({
       personal: {
@@ -108,6 +137,8 @@ describe("App utility functions", () => {
     });
 
     expect(normalized.styles.personal).toBeTruthy();
+    expect(normalized.styles.work).toBeTruthy();
+    expect(normalized.styles.social).toBeTruthy();
     expect(normalized.customModels).toEqual([{ value: "custom/model-one", label: "Model One" }]);
   });
 

@@ -320,6 +320,7 @@ describe("Feature model UI and persistence", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
 
     await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Profile" })).toHaveValue("client-voice");
       expect(getStoredProfileRecord("client-voice")?.profile).toEqual({ tone: "balanced" });
       expect(getStoredProfileRecord("client-voice")?.sampleCount).toBe(1);
     }, { timeout: 9000 });
@@ -333,6 +334,80 @@ describe("Feature model UI and persistence", () => {
       expect(getStoredProfileRecord("client-voice")?.profile).toEqual({ tone: "balanced" });
     }, { timeout: 9000 });
   }, 15000);
+
+  test("switching between built-in and custom profiles updates the profile systems to the selected record", async () => {
+    setStoredProfileData({
+      personal: {
+        id: "personal",
+        name: "Personal",
+        isCustom: false,
+        profile: { tone: "warm" },
+        sampleEntries: [{ id: 1, text: "This is a long enough built in sample to count as trained profile content.", type: "general" }],
+        sampleCount: 1,
+        updatedAt: new Date().toISOString(),
+      },
+      work: {
+        id: "work",
+        name: "Work",
+        isCustom: false,
+        profile: null,
+        sampleEntries: [],
+        sampleCount: 0,
+      },
+      social: {
+        id: "social",
+        name: "Social Media",
+        isCustom: false,
+        profile: null,
+        sampleEntries: [],
+        sampleCount: 0,
+      },
+      "client-voice": {
+        id: "client-voice",
+        name: "Client Voice",
+        isCustom: true,
+        profile: { tone: "direct" },
+        sampleEntries: [{ id: 1, text: "This is a long enough custom sample to count as trained profile content too.", type: "general" }],
+        sampleCount: 1,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    renderWithMantine(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Profile" })).toHaveValue("personal");
+    });
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Profile" }), {
+      target: { value: "client-voice" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Profile" })).toHaveValue("client-voice");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "View writing profile" }));
+    await waitFor(() => {
+      expect(screen.getByText("Client Voice Writing Profile")).toBeInTheDocument();
+      expect(screen.getByText("direct")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close profile modal" }));
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Profile" }), {
+      target: { value: "personal" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Profile" })).toHaveValue("personal");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "View writing profile" }));
+    await waitFor(() => {
+      expect(screen.getByText("Personal Writing Profile")).toBeInTheDocument();
+      expect(screen.getByText("warm")).toBeInTheDocument();
+    });
+  });
 
   test("falls back both model selections when removing a custom model", async () => {
     setStoredProfileData({}, [{ value: "custom/test-model", label: "Custom Test Model" }]);

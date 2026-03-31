@@ -133,7 +133,7 @@ export default function App() {
   }
 
   // Core
-  const [styles, setStyles]                     = useState({});
+  const [styles, setStyles]                     = useState(() => normalizeStoredStyles({}));
   const [activeProfileId, setActiveProfileId]   = useState(PROFILE_OPTIONS[0].id);
   const [addProfileModalOpen, setAddProfileModalOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
@@ -226,6 +226,28 @@ export default function App() {
     [modelOptions]
   );
   const customProfiles = useMemo(() => deriveCustomProfiles(styles), [styles]);
+  const availableProfiles = useMemo(() => {
+    const builtIns = PROFILE_OPTIONS
+      .map((profile) => {
+        const record = styles[profile.id];
+        return {
+          id: profile.id,
+          label: record?.name || profile.label,
+          isCustom: false,
+        };
+      });
+
+    const customs = Object.values(styles || {})
+      .filter((profile) => profile?.isCustom)
+      .sort((a, b) => (a?.name || "Custom").localeCompare(b?.name || "Custom"))
+      .map((profile) => ({
+        id: profile.id,
+        label: profile.name || "Custom",
+        isCustom: true,
+      }));
+
+    return [...builtIns, ...customs];
+  }, [styles]);
   const persistedProfileData = useMemo(
     () => ({ styles, customModels: customModelOptions }),
     [styles, customModelOptions]
@@ -386,7 +408,7 @@ export default function App() {
         const trainedProfiles = Object.values(resolvedProfileData.styles).filter((profile) => hasTrainedProfile(profile));
         if (!trainedProfiles.length) {
           setStyleModalOpen(true);
-        } else if (!resolvedProfileData.styles[activeProfileId]) {
+        } else if (!hasTrainedProfile(resolvedProfileData.styles[activeProfileId])) {
           setActiveProfileId(trainedProfiles[0]?.id || PROFILE_OPTIONS[0].id);
         }
 
@@ -657,6 +679,7 @@ export default function App() {
       [activeProfileId]: {
         id: activeProfileId,
         name: profileName,
+        isCustom: existingRecord?.isCustom ?? !PROFILE_OPTIONS.some((entry) => entry.id === activeProfileId),
         profile: null,
         sampleEntries: [],
         sampleCount: 0,
@@ -680,11 +703,7 @@ export default function App() {
   }
 
   function resolveProfileName(profileId) {
-    return (
-      PROFILE_OPTIONS.find((p) => p.id === profileId)?.label ||
-      styles[profileId]?.name ||
-      "Selected"
-    );
+    return styles[profileId]?.name || PROFILE_OPTIONS.find((p) => p.id === profileId)?.label || "Selected";
   }
 
   async function handleUpdateProfileMeta(profileId, metaUpdate) {
@@ -1047,7 +1066,8 @@ export default function App() {
           ...prev,
           [activeProfileId]: {
             id: activeProfileId,
-            name: profileName,
+            name: existingProfile?.name || profileName,
+            isCustom: existingProfile?.isCustom ?? !PROFILE_OPTIONS.some((entry) => entry.id === activeProfileId),
             profile: mergedProfile,
             sampleEntries,
             sampleCount: sampleEntries.length,
@@ -1557,7 +1577,7 @@ export default function App() {
       <Topbar
         activeProfileId={activeProfileId}
         onProfileChange={setActiveProfileId}
-        customProfiles={customProfiles}
+        profiles={availableProfiles}
         onAddProfile={handleAddProfile}
         hasProfile={hasProfile}
         activeProfile={activeProfile}
@@ -1746,7 +1766,7 @@ export default function App() {
         onUpdateCliches={async (updated) => { setCliches(updated); await save("cliches-v3", updated); }}
         clicheFetching={clicheFetching}
         hasProfile={hasProfile}
-        isCustomProfile={customProfiles.some((p) => p.id === activeProfileId)}
+        isCustomProfile={!!activeProfile?.isCustom}
         onExportProfile={exportProfile}
         onImportProfile={importProfile}
         onOpenApiKey={() => {
@@ -1795,7 +1815,7 @@ export default function App() {
           hasProfile={hasProfile}
           loading={profileMergeLoading}
           health={health}
-          profileLabel={PROFILE_OPTIONS.find((profile) => profile.id === activeProfileId)?.label || activeProfile?.name}
+          profileLabel={resolveProfileName(activeProfileId)}
           sampleCount={activeProfile?.sampleEntries?.length || activeProfile?.sampleCount || 0}
           sampleEntries={activeProfile?.sampleEntries || []}
           profile={activeProfile?.profile || null}

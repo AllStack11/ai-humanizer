@@ -1,12 +1,12 @@
 import { NativeSelect } from "@mantine/core";
 import { Button, Card } from "./AppUI.jsx";
-import { APP_VERSION, PROFILE_OPTIONS } from "../constants/index.js";
+import { APP_VERSION } from "../constants/index.js";
 import { formatRelativeTime } from "../utils/format.js";
 
 export default function Topbar({
   activeProfileId,
   onProfileChange,
-  customProfiles,
+  profiles,
   onAddProfile,
   hasProfile,
   activeProfile,
@@ -61,8 +61,7 @@ export default function Topbar({
                     }
                   }}
                   data={[
-                    ...PROFILE_OPTIONS.map((p) => ({ value: p.id, label: p.label })),
-                    ...(customProfiles || []).map((p) => ({ value: p.id, label: p.label })),
+                    ...(profiles || []).map((p) => ({ value: p.id, label: p.label })),
                     { value: "__add_new__", label: "＋ Add profile…" },
                   ]}
                   className="app-select-wrap"
