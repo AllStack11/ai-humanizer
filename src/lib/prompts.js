@@ -130,11 +130,14 @@ Rules:
 - Match the voice, tone, and rhythm of the surrounding text.
 - Preserve the original meaning and intent of the passage exactly.
 - Do NOT alter, repeat, or reference any text outside the <regen_target> markers.
+- Return exactly one replacement passage and nothing else.
+- Do NOT provide multiple options, numbered variants, headings, labels, commentary, or follow-up questions.
+- Do NOT wrap the replacement in quotes or markdown fences unless those characters are literally part of the passage itself.
 - Output ONLY the replacement text — no preamble, no labels, no explanation, no quotes.
 - Output length should closely match the original passage length.${clicheConstraint}`;
 };
 
-export const buildPartialRegenUserPrompt = (fullOutputText, selectedText) => `Full text for context:
+export const buildPartialRegenUserPrompt = (fullOutputText, selectedText, { strict = false } = {}) => `Full text for context:
 
 <full_output>
 ${fullOutputText}
@@ -144,4 +147,6 @@ Rewrite only this passage:
 
 <regen_target>
 ${selectedText}
-</regen_target>`;
+</regen_target>
+
+${strict ? "Your previous attempt included scaffolding. Return one unlabeled replacement passage only." : ""}`.trim();

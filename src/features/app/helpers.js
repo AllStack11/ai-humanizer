@@ -205,13 +205,15 @@ export function classifyRequestIssue(message) {
     };
   }
 
-  if (normalized.includes("empty response")) {
+  if (normalized.includes("empty response") || normalized.includes("no usable replacement text")) {
     return {
       kind: "empty_response",
       status: "error",
       summary: "Model returned no output.",
       detail: "The request completed but produced no usable text.",
-      userMessage: "The model finished without producing usable text.",
+      userMessage: normalized.includes("no usable replacement text")
+        ? "The model returned no usable replacement text."
+        : "The model finished without producing usable text.",
     };
   }
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { flushSync } from "react-dom";
 
 // Constants
 import {
@@ -31,7 +32,9 @@ import {
 } from "./features/app/helpers.js";
 import {
   buildHumanizeUserPrompt,
+  outputLooksLikeMetaPartialRegen,
   outputLooksLikeAnsweredPrompt,
+  sanitizePartialRegenOutput,
 } from "./features/humanize/promptGuards.js";
 import { useProcessLog } from "./features/process/useProcessLog.js";
 import { filterProfileForContext, describeProfileFilter } from "./lib/profileFilter.js";
@@ -42,6 +45,7 @@ import {
   estimateTokenCount,
   computeTextMetricSnapshot,
   computeWordCharDelta,
+  stitchReplacementIntoText,
   buildClicheRanges,
   createEmptyProfileTraits, createProfileRecord, deriveCustomProfiles, normalizeProfileTraits, normalizeSampleSlot, normalizeStoredStyles, normalizeStoredProfileData, getFilledSlots, formatSampleForPrompt,
   collectCoverageGaps, computeProfileHealth, hasTrainedProfile, normalizeProfileMeta, computeTraitConfidence,
@@ -1246,46 +1250,97 @@ export default function App() {
     if (!activeProfile) { setError("Onboard your writing profile first."); return; }
     if (!(await ensureApiKeyReady("regenerating selection"))) return;
 
-    setIsPartialStreaming(true);
-    setPartialRegenText(selectedText);
+    startProcessLog("Starting partial regeneration request.", `Mode: partial regen via ${featureModel}`);
     clearPartialHighlightFade();
-    setPartialHighlight({ rawStart, rawEnd, phase: "pending" });
+    const fullOutputSnapshot = outputText;
     // Snapshot before/after slices before any async state changes
-    const snapBefore = outputText.slice(0, rawStart);
-    const snapAfter = outputText.slice(rawEnd);
-    setOutputText(snapBefore + snapAfter);
+    const snapBefore = fullOutputSnapshot.slice(0, rawStart);
+    const snapAfter = fullOutputSnapshot.slice(rawEnd);
+    flushSync(() => {
+      setIsPartialStreaming(true);
+      setPartialRegenText(selectedText);
+      setPartialHighlight({ rawStart, rawEnd, phase: "pending" });
+      setOutputText(snapBefore + snapAfter);
+    });
     try {
+      pushProcessStep("Validating profile and selected passage.");
       const confidence = activeProfileConfidence;
       const filteredProfile = filterProfileForContext(
         activeProfile.profile, { toneLevel, formatPreset, mode, confidence }
       );
+      const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
+      pushProcessStep(filterMsg, "info", filterDetail);
       const systemPrompt = PARTIAL_REGEN_SYS(
         filteredProfile, toneLevel, stripCliches ? cliches : [],
         activeProfile.name, activeProfile.meta
       );
-      const result = await llmStream(
-        systemPrompt,
-        buildPartialRegenUserPrompt(outputText, selectedText),
-        (_, full) => {
-          setOutputText(snapBefore + full + snapAfter);
-          setPartialHighlight({ rawStart, rawEnd: rawStart + full.length, phase: "pending" });
-        },
-        computeMaxTokens(selectedText, "partial"),
-        featureModel,
-        runtimeConfig,
-        {
-          temperature: 0.7,
-          onUsage: (usage) => setOutputUsage(normalizeUsage(usage)),
+      const partialOptions = {
+        temperature: 0.7,
+        onUsage: (usage) => setOutputUsage(normalizeUsage(usage)),
+      };
+      const streamReplacement = async (streamSystemPrompt, userPrompt, firstChunkMessage) => {
+        let loggedFirstChunk = false;
+        const waitNoticeId = window.setTimeout(() => {
+          if (!loggedFirstChunk) {
+            pushProcessStep("Still waiting for the model to start streaming. OpenRouter may be queueing the request.", "warning");
+          }
+        }, STREAM_WAIT_NOTICE_MS);
+
+        try {
+          return await llmStream(
+            streamSystemPrompt,
+            userPrompt,
+            (_, full) => {
+              const sanitized = sanitizePartialRegenOutput(full);
+              const nextOutput = stitchReplacementIntoText(snapBefore, sanitized, snapAfter);
+              const insertedText = nextOutput.slice(snapBefore.length, nextOutput.length - snapAfter.length);
+              setOutputText(nextOutput);
+              setPartialHighlight({ rawStart, rawEnd: rawStart + insertedText.length, phase: "pending" });
+              if (!loggedFirstChunk && sanitized) {
+                loggedFirstChunk = true;
+                pushProcessStep(firstChunkMessage, "info");
+              }
+            },
+            computeMaxTokens(selectedText, "partial"),
+            featureModel,
+            runtimeConfig,
+            partialOptions
+          );
+        } finally {
+          window.clearTimeout(waitNoticeId);
         }
+      };
+
+      pushProcessStep("Preparing prompt and opening model stream.");
+      let result = await streamReplacement(
+        systemPrompt,
+        buildPartialRegenUserPrompt(fullOutputSnapshot, selectedText),
+        "Model stream connected. Receiving replacement output."
       );
-      if (!result?.trim()) throw new Error("The model returned an empty replacement.");
-      const finalized = result.trim();
-      setOutputText(snapBefore + finalized + snapAfter);
-      setPartialHighlight({ rawStart, rawEnd: rawStart + finalized.length, phase: "completed" });
+      let finalized = sanitizePartialRegenOutput(result);
+
+      if (!finalized || outputLooksLikeMetaPartialRegen(result)) {
+        pushProcessStep("Partial draft looked like scaffolding instead of a replacement. Retrying with stricter guardrails.", "info");
+        result = await streamReplacement(
+          `${systemPrompt}\n\nCritical constraint:\n- Return exactly one replacement passage and nothing else.\n- Never provide multiple options, labels, explanations, or follow-up questions.`,
+          buildPartialRegenUserPrompt(fullOutputSnapshot, selectedText, { strict: true }),
+          "Retry stream connected. Receiving guarded replacement output."
+        );
+        finalized = sanitizePartialRegenOutput(result);
+      }
+
+      if (!finalized) throw new Error("The model returned no usable replacement text.");
+      const completedOutput = stitchReplacementIntoText(snapBefore, finalized, snapAfter);
+      const completedInsertedText = completedOutput.slice(snapBefore.length, completedOutput.length - snapAfter.length);
+      setOutputText(completedOutput);
+      setPartialHighlight({ rawStart, rawEnd: rawStart + completedInsertedText.length, phase: "completed" });
       scheduleCompletedPartialHighlightFade();
+      pushProcessStep("Partial regeneration completed successfully.", "success", `${countWords(finalized)} words generated`);
+      completeProcess("Partial regeneration completed successfully.");
     } catch (e) {
       const message = getErrorMessage(e);
       const issue = classifyRequestIssue(message);
+      logRequestFailure("Partial regeneration failed.", message);
       setError(`Partial regen failed: ${issue.userMessage || message}`);
       setTimeout(() => setError(""), 4000);
       clearPartialHighlight();
@@ -1930,5 +1985,7 @@ export { extractStreamTextChunk } from './lib/api.js';
 export {
   analyzeHumanizeInput,
   buildHumanizeUserPrompt,
+  outputLooksLikeMetaPartialRegen,
   outputLooksLikeAnsweredPrompt,
+  sanitizePartialRegenOutput,
 } from "./features/humanize/promptGuards.js";

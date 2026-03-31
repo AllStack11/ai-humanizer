@@ -232,6 +232,13 @@ describe("PARTIAL_REGEN_SYS", () => {
     const prompt = PARTIAL_REGEN_SYS(profile, 1, []);
     expect(prompt).toMatch(/output length should closely match/i);
   });
+
+  test("forbids options and scaffolding in the output", () => {
+    const prompt = PARTIAL_REGEN_SYS(profile, 1, []);
+    expect(prompt).toMatch(/multiple options/i);
+    expect(prompt).toMatch(/follow-up questions/i);
+    expect(prompt).toMatch(/markdown fences/i);
+  });
 });
 
 // ─── buildPartialRegenUserPrompt ─────────────────────────────────────────────
@@ -245,6 +252,11 @@ describe("buildPartialRegenUserPrompt", () => {
   test("wraps selected text in regen_target tags", () => {
     const prompt = buildPartialRegenUserPrompt("full document", "selected part");
     expect(prompt).toContain("<regen_target>\nselected part\n</regen_target>");
+  });
+
+  test("adds stricter retry instructions when requested", () => {
+    const prompt = buildPartialRegenUserPrompt("full document", "selected part", { strict: true });
+    expect(prompt).toContain("previous attempt included scaffolding");
   });
 });
 

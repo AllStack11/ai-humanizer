@@ -27,8 +27,90 @@ const CONVERSATIONAL_OPENERS = [
   "what are",
 ];
 
+const PARTIAL_REGEN_OPTION_LIST_PATTERN = /(^|\n)\s*(?:[-*]\s*)?(?:option|version)\s*\d+\b/i;
+const PARTIAL_REGEN_META_LEADIN_PATTERN = /^(?:here(?:'s| is| are)\b.*(?:rewrite|rewritten|option|version)|below (?:is|are)\b.*(?:rewrite|rewritten|option|version)|i(?:'ve| have)? rewritten\b|rewrite options?\b|rewritten (?:text|passage)\b|replacement text\b|updated (?:text|passage|version)\b|edited (?:text|passage|version)\b)/i;
+const PARTIAL_REGEN_INLINE_LABEL_PATTERN = /^\s*(?:rewritten (?:text|passage)|replacement(?: text)?|updated (?:text|passage|version)|edited (?:text|passage|version)|rewrite)\s*:\s*/i;
+const PARTIAL_REGEN_TASK_REFERENCE_PATTERN = /\b(?:regen_target|selected passage|target passage|surrounding text|replacement text|rewrite options?)\b/i;
+const PARTIAL_REGEN_FOLLOW_UP_PATTERN = /(?:^|\n)\s*(?:which (?:tone|option|version)\b|let me know which\b|which one\b|which feels\b)/i;
+const PARTIAL_REGEN_EXPLANATION_PATTERN = /(?:^|\n)\s*(?:i chose|i kept|i preserved|this version|this rewrite|i made this|note:|explanation:)\b/i;
+
 function normalizeHumanizeText(text) {
   return String(text || "").trim().replace(/\s+/g, " ");
+}
+
+function unwrapWholeCodeFence(text) {
+  const match = String(text || "").trim().match(/^```(?:[\w-]+)?\n([\s\S]*?)\n```$/);
+  return match ? match[1].trim() : String(text || "").trim();
+}
+
+function unwrapSurroundingQuotes(text) {
+  const trimmed = String(text || "").trim();
+  if (trimmed.length < 2) return trimmed;
+  const first = trimmed[0];
+  const last = trimmed[trimmed.length - 1];
+  const quotePairs = new Set(['""', "''", "“”", "‘’"]);
+  if (!quotePairs.has(`${first}${last}`)) return trimmed;
+  return trimmed.slice(1, -1).trim();
+}
+
+function stripLeadingMeta(text) {
+  let working = String(text || "").trimStart();
+  if (!working) return "";
+
+  while (true) {
+    const before = working;
+    working = working.replace(PARTIAL_REGEN_INLINE_LABEL_PATTERN, "");
+
+    const paragraphMatch = working.match(/^([^\n]+)\n\s*\n([\s\S]+)$/);
+    if (paragraphMatch && PARTIAL_REGEN_META_LEADIN_PATTERN.test(paragraphMatch[1].trim())) {
+      working = paragraphMatch[2].trimStart();
+    }
+
+    const lineMatch = working.match(/^([^\n]+)\n([\s\S]+)$/);
+    if (lineMatch && PARTIAL_REGEN_META_LEADIN_PATTERN.test(lineMatch[1].trim())) {
+      working = lineMatch[2].trimStart();
+    }
+
+    const inlineMatch = working.match(/^([^\n]{0,120}):\s+([\s\S]+)$/);
+    if (
+      inlineMatch
+      && PARTIAL_REGEN_META_LEADIN_PATTERN.test(inlineMatch[1].trim())
+      && !PARTIAL_REGEN_OPTION_LIST_PATTERN.test(inlineMatch[2])
+    ) {
+      working = inlineMatch[2].trimStart();
+    }
+
+    if (working === before) break;
+  }
+
+  return working.trim();
+}
+
+function stripTrailingFollowUp(text) {
+  let working = String(text || "").trim();
+  if (!working) return "";
+
+  const followUpSplit = working.match(/^([\s\S]*?)\n\s*\n((?:which (?:tone|option|version)\b|let me know which\b|which one\b|which feels\b)[\s\S]*)$/i);
+  if (followUpSplit) {
+    working = followUpSplit[1].trim();
+  }
+
+  return working.trim();
+}
+
+function hasPartialRegenMetaSignals(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return false;
+
+  return (
+    PARTIAL_REGEN_OPTION_LIST_PATTERN.test(normalized) ||
+    PARTIAL_REGEN_META_LEADIN_PATTERN.test(normalized) ||
+    PARTIAL_REGEN_TASK_REFERENCE_PATTERN.test(normalized) ||
+    PARTIAL_REGEN_FOLLOW_UP_PATTERN.test(normalized) ||
+    PARTIAL_REGEN_EXPLANATION_PATTERN.test(normalized) ||
+    /^\s*#{1,6}\s+/.test(normalized) ||
+    /```/.test(normalized)
+  );
 }
 
 export function analyzeHumanizeInput(text) {
@@ -93,4 +175,35 @@ export function outputLooksLikeAnsweredPrompt(sourceText, outputText) {
   if (/\bhope (you are|you're|ur) (doing )?(well|good)\b/i.test(output)) suspicion += 1;
 
   return suspicion >= 2;
+}
+
+export function sanitizePartialRegenOutput(text) {
+  const raw = String(text || "").replace(/\r\n/g, "\n");
+  if (!raw.trim()) return "";
+  if (PARTIAL_REGEN_OPTION_LIST_PATTERN.test(raw)) return "";
+
+  let working = unwrapWholeCodeFence(raw);
+  working = stripLeadingMeta(working);
+  working = stripTrailingFollowUp(working);
+  working = unwrapSurroundingQuotes(working);
+  working = working.trim();
+
+  if (!working) return "";
+  if (PARTIAL_REGEN_OPTION_LIST_PATTERN.test(working)) return "";
+  if (PARTIAL_REGEN_TASK_REFERENCE_PATTERN.test(working)) return "";
+  if (PARTIAL_REGEN_EXPLANATION_PATTERN.test(working)) return "";
+  if (PARTIAL_REGEN_FOLLOW_UP_PATTERN.test(working)) return "";
+
+  return working;
+}
+
+export function outputLooksLikeMetaPartialRegen(outputText) {
+  const raw = String(outputText || "").trim();
+  if (!raw) return false;
+  if (PARTIAL_REGEN_OPTION_LIST_PATTERN.test(raw)) return true;
+  if (hasPartialRegenMetaSignals(raw)) {
+    const sanitized = sanitizePartialRegenOutput(raw);
+    return !sanitized || sanitized !== raw;
+  }
+  return false;
 }

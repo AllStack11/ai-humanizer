@@ -20,14 +20,44 @@ export function expandSelectionToWordBoundaries(text, start, end) {
   let nextStart = clampedStart;
   let nextEnd = clampedEnd;
 
-  while (nextStart > 0 && isWordChar(source[nextStart - 1]) && (nextStart >= source.length || isWordChar(source[nextStart] || ""))) {
+  while (nextStart > 0 && isWordChar(source[nextStart - 1])) {
     nextStart -= 1;
   }
-  while (nextEnd < source.length && isWordChar(source[nextEnd]) && (nextEnd === 0 || isWordChar(source[nextEnd - 1] || ""))) {
+  while (nextEnd < source.length && isWordChar(source[nextEnd])) {
     nextEnd += 1;
   }
 
   return { start: nextStart, end: nextEnd, text: source.slice(nextStart, nextEnd) };
+}
+
+function shouldInsertBoundarySpace(leftChar, rightChar) {
+  return isWordChar(leftChar) && isWordChar(rightChar);
+}
+
+export function stitchReplacementIntoText(beforeText, replacementText, afterText) {
+  const before = String(beforeText || "");
+  const replacement = String(replacementText || "").trim();
+  const after = String(afterText || "");
+
+  let nextReplacement = replacement;
+
+  if (nextReplacement) {
+    const leftChar = before.slice(-1);
+    const rightChar = nextReplacement[0];
+    if (shouldInsertBoundarySpace(leftChar, rightChar)) {
+      nextReplacement = ` ${nextReplacement}`;
+    }
+  }
+
+  if (nextReplacement) {
+    const leftChar = nextReplacement.slice(-1);
+    const rightChar = after[0];
+    if (shouldInsertBoundarySpace(leftChar, rightChar)) {
+      nextReplacement = `${nextReplacement} `;
+    }
+  }
+
+  return `${before}${nextReplacement}${after}`;
 }
 
 export function mapVisibleOffsetToRawOffset(rawText, visibleOffset) {

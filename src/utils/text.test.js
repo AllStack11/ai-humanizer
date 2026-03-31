@@ -11,6 +11,7 @@ import {
   expandSelectionToWordBoundaries,
   mapRawOffsetToVisibleOffset,
   mapVisibleOffsetToRawOffset,
+  stitchReplacementIntoText,
 } from "./text.js";
 
 describe("text metrics", () => {
@@ -82,6 +83,11 @@ describe("text metrics", () => {
     expect(expanded).toEqual({ start: 7, end: 12, text: "bravo" });
   });
 
+  test("expands the trailing edge to the end of a partially selected word", () => {
+    const expanded = expandSelectionToWordBoundaries("alpha bravo", 6, 8);
+    expect(expanded).toEqual({ start: 6, end: 11, text: "bravo" });
+  });
+
   test("maps visible offsets to raw markdown offsets", () => {
     const raw = "**alpha** bravo";
     expect(mapVisibleOffsetToRawOffset(raw, 5)).toBe(7);
@@ -92,5 +98,17 @@ describe("text metrics", () => {
     const raw = "**alpha** bravo";
     expect(mapRawOffsetToVisibleOffset(raw, 9)).toBe(5);
     expect(mapRawOffsetToVisibleOffset(raw, raw.length)).toBe(11);
+  });
+
+  test("stitches replacements without gluing adjacent words together", () => {
+    expect(stitchReplacementIntoText("alpha", "bravo", "charlie")).toBe("alpha bravo charlie");
+  });
+
+  test("does not add extra spaces before punctuation", () => {
+    expect(stitchReplacementIntoText("alpha ", "bravo", ", charlie")).toBe("alpha bravo, charlie");
+  });
+
+  test("preserves existing surrounding spacing when it is already correct", () => {
+    expect(stitchReplacementIntoText("alpha ", "bravo", " charlie")).toBe("alpha bravo charlie");
   });
 });

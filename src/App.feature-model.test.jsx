@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createTheme, MantineProvider } from "@mantine/core";
 
 const invokeMock = vi.fn();
@@ -196,10 +196,116 @@ describe("Feature model routing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Trigger partial regen" }));
 
     await waitFor(() => {
-      expect(screen.getByText(".")).toBeInTheDocument();
+      expect(within(screen.getByLabelText("mock-output-panel")).queryByText("Hello world.")).not.toBeInTheDocument();
       expect(pendingPartialRequestId).toBeTruthy();
     });
 
     expect(pendingPartialRequestId).toBeTruthy();
+  });
+
+  test("retries partial regen when the model returns rewrite scaffolding and commits only the replacement text", async () => {
+    let streamCallCount = 0;
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat_stream") {
+        streamCallCount += 1;
+        const requestId = args.requestId;
+        const fullText = streamCallCount === 1
+          ? "Hello world."
+          : streamCallCount === 2
+            ? `Here are a few rewrite options:
+
+Option 1: First draft.
+Option 2: Second draft.`
+            : "Refined replacement";
+        streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
+        return { ok: true };
+      }
+      return { ok: true };
+    });
+
+    const { default: App } = await import("./App.jsx");
+    renderWithMantine(<App />);
+
+    fireEvent.change(await screen.findByPlaceholderText("Paste AI-generated text here…"), {
+      target: { value: "This paragraph is long enough to generate output before testing partial regeneration retry." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Humanize text" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Trigger partial regen" })).toBeEnabled();
+      expect(screen.getByText("Hello world.")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Trigger partial regen" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("mock-output-panel")).toHaveTextContent("Refined replacement.");
+    });
+
+    expect(screen.queryByText(/Here are a few rewrite options/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open logs drawer" }));
+    expect(await screen.findByRole("log", { name: "Process log" })).toHaveTextContent(
+      "Partial draft looked like scaffolding instead of a replacement. Retrying with stricter guardrails."
+    );
+    expect(screen.getByRole("log", { name: "Process log" })).toHaveTextContent(
+      "Retry stream connected. Receiving guarded replacement output."
+    );
+    expect(streamCallCount).toBe(3);
+  });
+
+  test("shows an error when both partial regen attempts return unusable scaffolding", async () => {
+    let streamCallCount = 0;
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat_stream") {
+        streamCallCount += 1;
+        const requestId = args.requestId;
+        const fullText = streamCallCount === 1
+          ? "Hello world."
+          : `Here are a few rewrite options:
+
+Option 1: First draft.
+Option 2: Second draft.`;
+        streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
+        return { ok: true };
+      }
+      return { ok: true };
+    });
+
+    const { default: App } = await import("./App.jsx");
+    renderWithMantine(<App />);
+
+    fireEvent.change(await screen.findByPlaceholderText("Paste AI-generated text here…"), {
+      target: { value: "This paragraph is long enough to generate output before testing partial regeneration failure." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Humanize text" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Trigger partial regen" })).toBeEnabled();
+      expect(screen.getByText("Hello world.")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Trigger partial regen" }));
+
+    await waitFor(() => {
+      expect(document.body).toHaveTextContent("Partial regen failed: The model returned no usable replacement text.");
+    });
+
+    expect(within(screen.getByLabelText("mock-output-panel")).queryByText("Hello world.")).not.toBeInTheDocument();
+    expect(streamCallCount).toBe(3);
   });
 });
