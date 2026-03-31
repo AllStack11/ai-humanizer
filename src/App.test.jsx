@@ -484,8 +484,21 @@ describe("App UI", () => {
     fireEvent.keyDown(window, { key: "Enter", metaKey: true });
 
     await waitFor(() => {
+      const streamCalls = invokeMock.mock.calls.filter(([command]) => command === "openrouter_chat_stream");
+      expect(streamCalls).toHaveLength(2);
+    }, { timeout: 3000 });
+
+    await waitFor(() => {
       expect(screen.getByRole("region", { name: "LLM output" })).toHaveTextContent("hey how are you doing today?");
     }, { timeout: 3000 });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open logs drawer" }));
+    expect(await screen.findByRole("log", { name: "Process log" })).toHaveTextContent(
+      "Draft looked like a reply instead of a rewrite. Retrying with stricter guardrails."
+    );
+    expect(screen.getByRole("log", { name: "Process log" })).toHaveTextContent(
+      "Retry stream connected. Receiving guarded rewrite output."
+    );
 
     const streamCalls = invokeMock.mock.calls.filter(([command]) => command === "openrouter_chat_stream");
     expect(streamCalls).toHaveLength(2);
@@ -534,8 +547,7 @@ describe("App UI", () => {
     fireEvent.keyDown(window, { key: "Enter", metaKey: true });
 
     const generationLog = await screen.findByRole("log", { name: "Generation activity log" });
-    expect(screen.getByText("Generating Preview")).toBeInTheDocument();
-    expect(screen.getByText(/Preparing prompt and opening model stream\./i)).toBeInTheDocument();
+    expect(generationLog).toHaveTextContent(/Preparing prompt and opening model stream\./i);
     expect(within(generationLog).getByText(/Model stream connected\. Receiving rewrite output\./i)).toBeInTheDocument();
     await waitFor(() => {
       expect(

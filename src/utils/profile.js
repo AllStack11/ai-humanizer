@@ -1,4 +1,10 @@
-import { WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, PROFILE_OPTIONS, DEFAULT_PROFILE_META } from '../constants/index.js';
+import {
+  WRITING_SAMPLE_TYPES,
+  DEFAULT_SAMPLE_TYPE,
+  PROFILE_OPTIONS,
+  DEFAULT_PROFILE_META,
+  PROFILE_TRAIT_KEYS,
+} from '../constants/index.js';
 
 function isBuiltInProfileId(id) {
   return PROFILE_OPTIONS.some((profile) => profile.id === id);
@@ -33,11 +39,26 @@ export function createProfileRecord(profileId, overrides = {}, legacyCustomProfi
     id: profileId,
     name: typeof overrides?.name === "string" && overrides.name.trim() ? overrides.name.trim() : fallbackName,
     isCustom,
-    profile: overrides?.profile && typeof overrides.profile === "object" && !Array.isArray(overrides.profile) ? overrides.profile : null,
+    profile: overrides?.profile && typeof overrides.profile === "object" && !Array.isArray(overrides.profile)
+      ? normalizeProfileTraits(overrides.profile)
+      : null,
     sampleEntries,
     sampleCount: sampleEntries.length,
     meta: normalizeProfileMeta(overrides?.meta),
   };
+}
+
+export function createEmptyProfileTraits() {
+  return Object.fromEntries(PROFILE_TRAIT_KEYS.map((key) => [key, ""]));
+}
+
+export function normalizeProfileTraits(rawProfile) {
+  if (!rawProfile || typeof rawProfile !== "object" || Array.isArray(rawProfile)) return createEmptyProfileTraits();
+
+  return PROFILE_TRAIT_KEYS.reduce((normalized, key) => {
+    normalized[key] = typeof rawProfile[key] === "string" ? rawProfile[key].trim() : "";
+    return normalized;
+  }, createEmptyProfileTraits());
 }
 
 function normalizeSampleTypeKey(rawValue = "") {
@@ -158,19 +179,13 @@ export function normalizeProfileMeta(rawMeta) {
 
 const HIGH_EVIDENCE_TRAITS = new Set(["quirks", "humor", "transitionStyle"]);
 
-const ALL_TRAIT_KEYS = [
-  "tone", "sentenceStructure", "vocabulary", "punctuationHabits",
-  "quirks", "perspective", "rhythm", "emotionalRegister",
-  "formality", "humor", "transitionStyle",
-];
-
 export function computeTraitConfidence(profileRecord) {
   const sampleEntries = Array.isArray(profileRecord?.sampleEntries) ? profileRecord.sampleEntries : [];
   const sampleCount = sampleEntries.length;
   const typeDiversity = new Set(sampleEntries.map(e => e.type).filter(Boolean)).size;
 
   const confidence = {};
-  for (const key of ALL_TRAIT_KEYS) {
+  for (const key of PROFILE_TRAIT_KEYS) {
     const hasValue = !!profileRecord?.profile?.[key];
     if (!hasValue) { confidence[key] = "low"; continue; }
     const needsHighEvidence = HIGH_EVIDENCE_TRAITS.has(key);

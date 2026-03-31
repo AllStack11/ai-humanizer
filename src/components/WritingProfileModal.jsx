@@ -1,26 +1,13 @@
 import { useState } from "react";
 import { Modal } from "@mantine/core";
 import { Button, Card } from "./AppUI.jsx";
-import { WRITING_SAMPLE_TYPES, PROFILE_GOAL_OPTIONS, PROFILE_DOMAIN_OPTIONS } from "../constants/index.js";
-
-const PROFILE_TRAITS = [
-  ["Tone", "tone"],
-  ["Emotional Register", "emotionalRegister"],
-  ["Vocabulary", "vocabulary"],
-  ["Perspective", "perspective"],
-  ["Sentence Structure", "sentenceStructure"],
-  ["Rhythm", "rhythm"],
-  ["Punctuation Habits", "punctuationHabits"],
-  ["Quirks", "quirks"],
-  ["Formality", "formality"],
-  ["Humor", "humor"],
-  ["Transition Style", "transitionStyle"],
-];
+import { WRITING_SAMPLE_TYPES, PROFILE_GOAL_OPTIONS, PROFILE_DOMAIN_OPTIONS, PROFILE_TRAITS } from "../constants/index.js";
+import { normalizeProfileTraits } from "../utils/index.js";
 
 export default function WritingProfileModal({ profile, health, profileLabel, hasProfile, confidence, meta, onUpdateMeta, onUpdateProfile, onClose }) {
   const [editingTrait, setEditingTrait] = useState(null);
   const [draftValue, setDraftValue]     = useState("");
-  const safeProfile = profile && typeof profile === "object" && !Array.isArray(profile) ? profile : null;
+  const safeProfile = profile && typeof profile === "object" && !Array.isArray(profile) ? normalizeProfileTraits(profile) : null;
 
   function startEdit(key) {
     setEditingTrait(key);
@@ -84,18 +71,9 @@ export default function WritingProfileModal({ profile, health, profileLabel, has
         </Card>
       ) : (
         <>
-          {safeProfile?.summary && (
-            <div className="debug-block" style={{ borderRadius: 12, overflow: "hidden" }}>
-              <p className="panel-title" style={{ marginBottom: 6 }}>Summary</p>
-              <p className="debug-block-content" style={{ margin: 0, fontSize: 13, lineHeight: 1.7 }}>
-                {safeProfile.summary}
-              </p>
-            </div>
-          )}
-
           {safeProfile && (
             <div className="diagnostic-log-detail-grid">
-              {PROFILE_TRAITS.filter(([, key]) => safeProfile[key]).map(([label, key]) => {
+              {PROFILE_TRAITS.map(({ label, key }) => {
                 const isEditing = editingTrait === key;
                 return (
                   <div key={key} className="debug-block">
@@ -149,7 +127,9 @@ export default function WritingProfileModal({ profile, health, profileLabel, has
                         style={{ width: "100%", boxSizing: "border-box", resize: "vertical", margin: 0, overflowY: "auto" }}
                       />
                     ) : (
-                      <p className="debug-block-content" style={{ margin: 0 }}>{safeProfile[key]}</p>
+                      <p className="debug-block-content" style={{ margin: 0, color: safeProfile[key] ? undefined : "#9b8e7e" }}>
+                        {safeProfile[key] || "Not set"}
+                      </p>
                     )}
                   </div>
                 );

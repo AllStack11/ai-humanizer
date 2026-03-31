@@ -1,4 +1,4 @@
-import { normalizeSampleSlot } from "../../utils/index.js";
+import { normalizeProfileTraits, normalizeSampleSlot } from "../../utils/index.js";
 
 export function getErrorMessage(error, fallback = "Unexpected error.") {
   if (error instanceof Error && error.message) return error.message;
@@ -302,15 +302,13 @@ export function normalizeProfileObject(rawProfile) {
     throw new Error("Model returned invalid profile structure.");
   }
 
-  const normalizedEntries = Object.entries(rawProfile)
-    .filter(([, value]) => typeof value === "string" && value.trim())
-    .map(([key, value]) => [key, value.trim()]);
-
-  if (!normalizedEntries.length) {
+  const normalizedProfile = normalizeProfileTraits(rawProfile);
+  const hasContent = Object.values(normalizedProfile).some((value) => typeof value === "string" && value.trim());
+  if (!hasContent) {
     throw new Error("Model returned invalid profile structure.");
   }
 
-  return Object.fromEntries(normalizedEntries);
+  return normalizedProfile;
 }
 
 export function dedupeSampleEntries(entries) {

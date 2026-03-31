@@ -43,7 +43,7 @@ import {
   computeTextMetricSnapshot,
   computeWordCharDelta,
   buildClicheRanges,
-  createProfileRecord, deriveCustomProfiles, normalizeSampleSlot, normalizeStoredStyles, normalizeStoredProfileData, getFilledSlots, formatSampleForPrompt,
+  createEmptyProfileTraits, createProfileRecord, deriveCustomProfiles, normalizeProfileTraits, normalizeSampleSlot, normalizeStoredStyles, normalizeStoredProfileData, getFilledSlots, formatSampleForPrompt,
   collectCoverageGaps, computeProfileHealth, hasTrainedProfile, normalizeProfileMeta, computeTraitConfidence,
   getFormatPresetInstruction, formatRelativeTime,
 } from './utils/index.js';
@@ -724,11 +724,15 @@ export default function App() {
   async function handleUpdateProfileTrait(profileId, traitUpdate) {
     const existing = styles[profileId];
     if (!existing) return;
+    const nextProfile = normalizeProfileTraits({
+      ...(existing.profile || createEmptyProfileTraits()),
+      ...traitUpdate,
+    });
     const updatedStyles = {
       ...styles,
       [profileId]: {
         ...existing,
-        profile: { ...(existing.profile || {}), ...traitUpdate },
+        profile: nextProfile,
         updatedAt: new Date().toISOString(),
       },
     };
@@ -1058,17 +1062,13 @@ export default function App() {
           : [];
         const sampleEntries = dedupeSampleEntries([...existingSamples, ...filled]);
         const createdAt = existingProfile?.createdAt || new Date().toISOString();
-        const mergedProfile = existing && isPlainObject(existing.profile)
-          ? { ...existing.profile, ...profile }
-          : profile;
-
         return {
           ...prev,
           [activeProfileId]: {
             id: activeProfileId,
             name: existingProfile?.name || profileName,
             isCustom: existingProfile?.isCustom ?? !PROFILE_OPTIONS.some((entry) => entry.id === activeProfileId),
-            profile: mergedProfile,
+            profile,
             sampleEntries,
             sampleCount: sampleEntries.length,
             createdAt,

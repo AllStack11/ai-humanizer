@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isPlainObject, normalizeProfileObject, parseJsonFromModelOutput } from "./helpers.js";
+import { PROFILE_TRAIT_KEYS } from "../../constants/index.js";
 
 describe("parseJsonFromModelOutput", () => {
   it("parses clean JSON objects", () => {
@@ -82,17 +83,29 @@ describe("profile object validation", () => {
   });
 
   it("keeps only trimmed string fields", () => {
-    expect(
-      normalizeProfileObject({
-        tone: " balanced ",
-        sampleCount: 4,
-        nested: { bad: true },
-        humor: " dry ",
-        summary: "",
-      })
-    ).toEqual({
-      tone: "balanced",
-      humor: "dry",
+    const normalized = normalizeProfileObject({
+      tone: " balanced ",
+      sampleCount: 4,
+      nested: { bad: true },
+      humor: " dry ",
+      summary: "",
     });
+
+    expect(Object.keys(normalized).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
+    expect(normalized.tone).toBe("balanced");
+    expect(normalized.humor).toBe("dry");
+    expect(normalized.vocabulary).toBe("");
+    expect(normalized.transitionStyle).toBe("");
+  });
+
+  it("fills in missing canonical traits with empty strings", () => {
+    const normalized = normalizeProfileObject({
+      tone: "direct",
+      humor: "",
+    });
+
+    expect(normalized.tone).toBe("direct");
+    expect(normalized.humor).toBe("");
+    expect(normalized.rhythm).toBe("");
   });
 });

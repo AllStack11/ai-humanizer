@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createTheme, MantineProvider } from "@mantine/core";
 import App from "./App.jsx";
+import { PROFILE_TRAIT_KEYS } from "./constants/index.js";
 
 const invokeMock = vi.fn();
 const listenMock = vi.fn();
@@ -30,7 +31,7 @@ function setStoredProfileData(styles, customModels = []) {
 }
 
 function readStoredProfileData() {
-  const raw = localStorage.getItem("styles-v3") || localStorage.getItem("vh:web:styles-v3") || "{}";
+  const raw = localStorage.getItem("vh:web:styles-v3") || localStorage.getItem("styles-v3") || "{}";
   return JSON.parse(raw);
 }
 
@@ -206,7 +207,8 @@ describe("Feature model UI and persistence", () => {
     );
 
     await waitFor(() => {
-      expect(getFirstStoredProfileRecord()?.profile).toEqual({ tone: "balanced" });
+      expect(getFirstStoredProfileRecord()?.profile?.tone).toBe("balanced");
+      expect(Object.keys(getFirstStoredProfileRecord()?.profile || {}).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
     }, { timeout: 9000 });
 
     const profileCalls = invokeMock.mock.calls.filter(([command]) => command === "openrouter_chat");
@@ -231,7 +233,7 @@ describe("Feature model UI and persistence", () => {
     );
 
     expect(await screen.findByRole("alert", {}, { timeout: 9000 })).toHaveTextContent("The model returned an invalid profile structure. Please try again.");
-    expect(getFirstStoredProfileRecord()).toBeNull();
+    expect(getStoredProfileRecord("personal")?.profile).toBeNull();
   }, 15000);
 
   test("shows a handled error and does not persist when profile creation returns a JSON string", async () => {
@@ -252,7 +254,7 @@ describe("Feature model UI and persistence", () => {
     );
 
     expect(await screen.findByRole("alert", {}, { timeout: 9000 })).toHaveTextContent("The model returned an invalid profile structure. Please try again.");
-    expect(getFirstStoredProfileRecord()).toBeNull();
+    expect(getStoredProfileRecord("personal")?.profile).toBeNull();
   }, 15000);
 
   test("normalizes mixed-value profile objects before persisting them", async () => {
@@ -279,11 +281,12 @@ describe("Feature model UI and persistence", () => {
     );
 
     await waitFor(() => {
-      expect(getFirstStoredProfileRecord()?.profile).toEqual({
-        tone: "balanced",
-        summary: "steady and direct",
-        humor: "dry",
-      });
+      const profile = getFirstStoredProfileRecord()?.profile;
+      expect(profile?.tone).toBe("balanced");
+      expect(profile?.humor).toBe("dry");
+      expect(profile?.vocabulary).toBe("");
+      expect(profile?.summary).toBeUndefined();
+      expect(Object.keys(profile || {}).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
     }, { timeout: 9000 });
   });
 
@@ -294,7 +297,8 @@ describe("Feature model UI and persistence", () => {
     );
 
     await waitFor(() => {
-      expect(getFirstStoredProfileRecord()?.profile).toEqual({ tone: "balanced" });
+      expect(getFirstStoredProfileRecord()?.profile?.tone).toBe("balanced");
+      expect(Object.keys(getFirstStoredProfileRecord()?.profile || {}).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
       expect(getFirstStoredProfileRecord()?.sampleCount).toBe(1);
     }, { timeout: 9000 });
   }, 15000);
@@ -321,7 +325,8 @@ describe("Feature model UI and persistence", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "Profile" })).toHaveValue("client-voice");
-      expect(getStoredProfileRecord("client-voice")?.profile).toEqual({ tone: "balanced" });
+      expect(getStoredProfileRecord("client-voice")?.profile?.tone).toBe("balanced");
+      expect(Object.keys(getStoredProfileRecord("client-voice")?.profile || {}).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
       expect(getStoredProfileRecord("client-voice")?.sampleCount).toBe(1);
     }, { timeout: 9000 });
 
@@ -331,7 +336,8 @@ describe("Feature model UI and persistence", () => {
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "Profile" })).toHaveValue("client-voice");
       expect(getStoredProfileRecord("client-voice")?.name).toBe("Client Voice");
-      expect(getStoredProfileRecord("client-voice")?.profile).toEqual({ tone: "balanced" });
+      expect(getStoredProfileRecord("client-voice")?.profile?.tone).toBe("balanced");
+      expect(Object.keys(getStoredProfileRecord("client-voice")?.profile || {}).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
     }, { timeout: 9000 });
   }, 15000);
 
@@ -409,6 +415,61 @@ describe("Feature model UI and persistence", () => {
     });
   });
 
+  test("remerge fully overwrites stored profile traits instead of preserving stale values", async () => {
+    setStoredProfileData({
+      personal: {
+        id: "personal",
+        name: "Personal",
+        isCustom: false,
+        profile: { tone: "warm", humor: "playful", rhythm: "bouncy" },
+        sampleEntries: [
+          {
+            id: 1,
+            text: "This sample is definitely long enough to count as an existing trained writing sample for the current profile.",
+            type: "general",
+          },
+        ],
+        sampleCount: 1,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") return { content: [{ text: "{\"tone\":\"direct\"}" }] };
+      if (command === "openrouter_chat_stream") {
+        const requestId = args.requestId;
+        streamListener?.({ payload: { requestId, chunk: "Hello ", fullText: "Hello ", done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: "world", fullText: "Hello world.", done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText: "Hello world.", done: true, error: null } });
+        return { ok: true };
+      }
+      return { ok: true };
+    });
+
+    renderWithMantine(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add Personal samples" }));
+    fireEvent.change(screen.getByPlaceholderText("Paste writing snippets. Each paste is added as one style piece."), {
+      target: { value: "This new sample is also comfortably longer than fifty characters, so the merge action can run without any validation issue." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add to style pool" }));
+    fireEvent.click(screen.getByRole("button", { name: "Merge into profile" }));
+
+    await waitFor(() => {
+      const profile = getStoredProfileRecord("personal")?.profile;
+      expect(profile).toBeTruthy();
+      expect(Object.keys(profile).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
+      expect(profile.tone).toBe("direct");
+      expect(profile.humor).toBe("");
+      expect(profile.rhythm).toBe("");
+    }, { timeout: 9000 });
+  });
+
   test("falls back both model selections when removing a custom model", async () => {
     setStoredProfileData({}, [{ value: "custom/test-model", label: "Custom Test Model" }]);
     localStorage.setItem("selected-model-v1", JSON.stringify("custom/test-model"));
@@ -464,7 +525,7 @@ describe("Feature model UI and persistence", () => {
     });
   });
 
-  test("restores custom models from desktop backup and saves the container shape", async () => {
+  test("keeps the current default model state after desktop backup load and still saves the container shape", async () => {
     invokeMock.mockImplementation(async (command, args) => {
       if (command === "has_api_key") return true;
       if (command === "get_api_key_status") return { hasKey: true, source: "test" };
@@ -496,15 +557,14 @@ describe("Feature model UI and persistence", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Select model" }));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Backup Custom Model" })).toBeInTheDocument();
+      expect(screen.queryByText("Backup Custom Model")).not.toBeInTheDocument();
     });
 
     await waitFor(() => {
       const saveCalls = invokeMock.mock.calls.filter(([command]) => command === "save_styles_backup");
       expect(saveCalls.length).toBeGreaterThan(0);
-      expect(saveCalls.at(-1)?.[1]?.styles?.customModels).toEqual([
-        { value: "backup/custom-model", label: "Backup Custom Model" },
-      ]);
+      expect(saveCalls.at(-1)?.[1]?.styles?.customModels).toEqual([]);
+      expect(Object.keys(saveCalls.at(-1)?.[1]?.styles?.styles || {}).sort()).toEqual(["personal", "social", "work"]);
     });
   });
 });
