@@ -111,6 +111,44 @@ describe("App utility functions", () => {
     expect(normalized.customModels).toEqual([{ value: "custom/model-one", label: "Model One" }]);
   });
 
+  test("normalizeStoredProfileData migrates legacy customProfiles into style records", () => {
+    const normalized = normalizeStoredProfileData(
+      {
+        styles: {},
+        customModels: [],
+      },
+      [{ id: "freelance-pitches", label: "Freelance Pitches" }]
+    );
+
+    expect(normalized.styles["freelance-pitches"]).toMatchObject({
+      id: "freelance-pitches",
+      name: "Freelance Pitches",
+      isCustom: true,
+      profile: null,
+      sampleCount: 0,
+    });
+  });
+
+  test("normalizeStoredProfileData keeps custom profile labels on existing migrated records", () => {
+    const normalized = normalizeStoredProfileData(
+      {
+        styles: {
+          "freelance-pitches": {
+            profile: { tone: "direct" },
+            sampleEntries: [{ id: 1, text: "Pitch sample", type: "general" }],
+          },
+        },
+      },
+      [{ id: "freelance-pitches", label: "Freelance Pitches" }]
+    );
+
+    expect(normalized.styles["freelance-pitches"]).toMatchObject({
+      id: "freelance-pitches",
+      name: "Freelance Pitches",
+      isCustom: true,
+    });
+  });
+
   test("normalizeStoredProfileData filters malformed custom models", () => {
     const normalized = normalizeStoredProfileData({
       styles: {},

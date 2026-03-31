@@ -39,6 +39,10 @@ function getFirstStoredProfileRecord() {
   return Object.values(stored.styles || {})[0] || null;
 }
 
+function getStoredProfileRecord(profileId) {
+  return readStoredProfileData().styles?.[profileId] || null;
+}
+
 async function createProfileFromOnboarding(sampleText) {
   fireEvent.click(await screen.findByRole("button", { name: "Start onboarding" }));
   fireEvent.change(screen.getByPlaceholderText("Paste writing snippets. Each paste is added as one style piece."), {
@@ -46,6 +50,16 @@ async function createProfileFromOnboarding(sampleText) {
   });
   fireEvent.click(screen.getByRole("button", { name: "Add to style pool" }));
   fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+}
+
+async function addCustomProfile(name) {
+  fireEvent.change(screen.getByRole("combobox", { name: "Profile" }), {
+    target: { value: "__add_new__" },
+  });
+  fireEvent.change(await screen.findByPlaceholderText("e.g. Freelance pitches"), {
+    target: { value: name },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
 }
 
 describe("Feature model UI and persistence", () => {
@@ -283,7 +297,42 @@ describe("Feature model UI and persistence", () => {
       expect(getFirstStoredProfileRecord()?.profile).toEqual({ tone: "balanced" });
       expect(getFirstStoredProfileRecord()?.sampleCount).toBe(1);
     }, { timeout: 9000 });
-  });
+  }, 15000);
+
+  test("keeps a second custom profile record attached to its own id across remounts", async () => {
+    const { unmount } = renderWithMantine(<App />);
+
+    await addCustomProfile("Client Voice");
+
+    await waitFor(() => {
+      expect(getStoredProfileRecord("client-voice")).toMatchObject({
+        id: "client-voice",
+        name: "Client Voice",
+        isCustom: true,
+        profile: null,
+      });
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Paste writing snippets. Each paste is added as one style piece."), {
+      target: { value: "This is a long enough writing sample to create the second custom profile and keep its data attached." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add to style pool" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create profile" }));
+
+    await waitFor(() => {
+      expect(getStoredProfileRecord("client-voice")?.profile).toEqual({ tone: "balanced" });
+      expect(getStoredProfileRecord("client-voice")?.sampleCount).toBe(1);
+    }, { timeout: 9000 });
+
+    unmount();
+    renderWithMantine(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Profile" })).toHaveValue("client-voice");
+      expect(getStoredProfileRecord("client-voice")?.name).toBe("Client Voice");
+      expect(getStoredProfileRecord("client-voice")?.profile).toEqual({ tone: "balanced" });
+    }, { timeout: 9000 });
+  }, 15000);
 
   test("falls back both model selections when removing a custom model", async () => {
     setStoredProfileData({}, [{ value: "custom/test-model", label: "Custom Test Model" }]);

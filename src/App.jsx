@@ -43,7 +43,7 @@ import {
   computeTextMetricSnapshot,
   computeWordCharDelta,
   buildClicheRanges,
-  normalizeSampleSlot, normalizeStoredStyles, normalizeStoredProfileData, getFilledSlots, formatSampleForPrompt,
+  createProfileRecord, deriveCustomProfiles, normalizeSampleSlot, normalizeStoredStyles, normalizeStoredProfileData, getFilledSlots, formatSampleForPrompt,
   collectCoverageGaps, computeProfileHealth, hasTrainedProfile, normalizeProfileMeta, computeTraitConfidence,
   getFormatPresetInstruction, formatRelativeTime,
 } from './utils/index.js';
@@ -135,7 +135,6 @@ export default function App() {
   // Core
   const [styles, setStyles]                     = useState({});
   const [activeProfileId, setActiveProfileId]   = useState(PROFILE_OPTIONS[0].id);
-  const [customProfiles, setCustomProfiles]     = useState([]);
   const [addProfileModalOpen, setAddProfileModalOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [newProfileName, setNewProfileName]     = useState("");
@@ -226,6 +225,7 @@ export default function App() {
     () => modelOptions.filter((entry) => !MODEL_OPTIONS.some((base) => base.value === entry.value)),
     [modelOptions]
   );
+  const customProfiles = useMemo(() => deriveCustomProfiles(styles), [styles]);
   const persistedProfileData = useMemo(
     () => ({ styles, customModels: customModelOptions }),
     [styles, customModelOptions]
@@ -323,19 +323,11 @@ export default function App() {
     const handleStorageChange = async (e) => {
       if (!e.key) return;
 
-      // Identify the keys that should trigger a state refresh
       const isStyleKey = e.key.includes("styles-v3");
-      const isCustomProfileKey = e.key.includes(CUSTOM_PROFILES_KEY);
-
       if (isStyleKey) {
         const nextProfileData = normalizeStoredProfileData(await load("styles-v3"));
         setStyles(nextProfileData.styles);
         setModelOptions(mergeModelOptionsWithSelections(nextProfileData.customModels, selectedModel, featureModel));
-      }
-
-      if (isCustomProfileKey) {
-        const nextCustom = await load(CUSTOM_PROFILES_KEY);
-        if (Array.isArray(nextCustom)) setCustomProfiles(nextCustom);
       }
     };
 
@@ -369,7 +361,6 @@ export default function App() {
           load(MODEL_PREF_KEY),
           load(FEATURE_MODEL_PREF_KEY),
         ]);
-        if (Array.isArray(storedCustomProfiles)) setCustomProfiles(storedCustomProfiles);
         const resolvedRuntimeConfig = {
           apiUrl: typeof storedRuntimeConfig?.apiUrl === "string" ? storedRuntimeConfig.apiUrl.trim() : "",
           apiKeyFile: typeof storedRuntimeConfig?.apiKeyFile === "string" ? storedRuntimeConfig.apiKeyFile.trim() : "",
@@ -378,12 +369,12 @@ export default function App() {
         setApiUrlInput(resolvedRuntimeConfig.apiUrl);
         setApiKeyFileInput(resolvedRuntimeConfig.apiKeyFile);
         let stylesSource = "localStorage";
-        let resolvedProfileData = normalizeStoredProfileData(storedStyles);
+        let resolvedProfileData = normalizeStoredProfileData(storedStyles, storedCustomProfiles);
         if (!Object.keys(resolvedProfileData.styles).length && !resolvedProfileData.customModels.length) {
           stylesSource = "backup";
           const backupStyles = await loadStylesBackup();
           if (backupStyles) {
-            resolvedProfileData = normalizeStoredProfileData(backupStyles);
+            resolvedProfileData = normalizeStoredProfileData(backupStyles, storedCustomProfiles);
             if (Object.keys(resolvedProfileData.styles).length || resolvedProfileData.customModels.length) {
               await save("styles-v3", resolvedProfileData);
             }
@@ -526,10 +517,6 @@ export default function App() {
     save("styles-v3", persistedProfileData);
     saveStylesBackupWithRetry(persistedProfileData);
   }, [persistedProfileData]);
-  useEffect(() => {
-    if (!backupSyncReadyRef.current) return;
-    save(CUSTOM_PROFILES_KEY, customProfiles);
-  }, [customProfiles]);
   useEffect(() => { save(RUNTIME_API_CONFIG_KEY, runtimeConfig); }, [runtimeConfig]);
 
   useEffect(() => {
@@ -617,12 +604,16 @@ export default function App() {
     reader.onload = (e) => {
       try {
         const parsed = JSON.parse(e.target.result);
-        const normalized = normalizeStoredProfileData(parsed);
+        const normalized = normalizeStoredProfileData(parsed, parsed?.customProfiles);
         if (!Object.keys(normalized.styles).length && !normalized.customModels.length) {
           setError("Import failed: no valid profile found.");
           return;
         }
         setStyles(normalized.styles);
+        const importedProfileIds = Object.keys(normalized.styles);
+        if (importedProfileIds.length && !normalized.styles[activeProfileId]) {
+          setActiveProfileId(importedProfileIds[0]);
+        }
         setModelOptions(mergeModelOptionsWithSelections(normalized.customModels, selectedModel, featureModel));
       } catch { setError("Import failed: invalid JSON file."); }
     };
@@ -691,18 +682,17 @@ export default function App() {
   function resolveProfileName(profileId) {
     return (
       PROFILE_OPTIONS.find((p) => p.id === profileId)?.label ||
-      customProfiles.find((p) => p.id === profileId)?.label ||
       styles[profileId]?.name ||
       "Selected"
     );
   }
 
   async function handleUpdateProfileMeta(profileId, metaUpdate) {
-    const existing = styles[profileId];
+    const existing = styles[profileId] || createProfileRecord(profileId, {});
     const updatedStyles = {
       ...styles,
       [profileId]: {
-        ...(existing || {}),
+        ...existing,
         meta: { ...normalizeProfileMeta(existing?.meta), ...metaUpdate },
         updatedAt: new Date().toISOString(),
       },
@@ -740,14 +730,25 @@ export default function App() {
     const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "custom";
     const existingIds = new Set([
       ...PROFILE_OPTIONS.map((p) => p.id),
-      ...customProfiles.map((p) => p.id),
+      ...Object.keys(styles),
     ]);
     let id = base;
     let n = 2;
     while (existingIds.has(id)) { id = `${base}-${n++}`; }
-    const nextCustomProfiles = [...customProfiles, { id, label: name }];
-    setCustomProfiles(nextCustomProfiles);
-    await save(CUSTOM_PROFILES_KEY, nextCustomProfiles);
+    const nextStyles = {
+      ...styles,
+      [id]: createProfileRecord(id, {
+        name,
+        isCustom: true,
+        profile: null,
+        sampleEntries: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    };
+    setStyles(nextStyles);
+    await save("styles-v3", { styles: nextStyles, customModels: customModelOptions });
+    if (backupSyncReadyRef.current) await saveStylesBackupWithRetry({ styles: nextStyles, customModels: customModelOptions });
     setActiveProfileId(id);
     setAddProfileModalOpen(false);
     setNewProfileName("");
@@ -759,18 +760,16 @@ export default function App() {
     const confirmed = window.confirm(`Delete the "${profileName}" profile? This cannot be undone.`);
     if (!confirmed) return;
 
-    const nextCustomProfiles = customProfiles.filter((p) => p.id !== activeProfileId);
     const nextStyles = { ...styles };
     delete nextStyles[activeProfileId];
 
     await save(`${WRITER_DRAFT_KEY}:${activeProfileId}`, null);
     await save(`${STYLE_MODAL_DRAFT_KEY}:${activeProfileId}`, null);
-    setCustomProfiles(nextCustomProfiles);
     setStyles(nextStyles);
     await save("styles-v3", { styles: nextStyles, customModels: customModelOptions });
     await saveStylesBackupWithRetry({ styles: nextStyles, customModels: customModelOptions });
 
-    const fallbackId = nextCustomProfiles[0]?.id || PROFILE_OPTIONS[0].id;
+    const fallbackId = deriveCustomProfiles(nextStyles)[0]?.id || PROFILE_OPTIONS[0].id;
     setActiveProfileId(fallbackId);
     clearOutputState();
     setStatus(`"${profileName}" profile deleted.`);
@@ -897,7 +896,8 @@ export default function App() {
     const filled = getFilledSlots(slots);
     if (!filled.length) { setError("Add writing samples (50+ chars each)."); return false; }
 
-    const existing = styles[activeProfileId];
+    const existingRecord = styles[activeProfileId];
+    const existing = hasTrainedProfile(existingRecord) ? existingRecord : null;
     const profileName = resolveProfileName(activeProfileId);
     setError("");
     setMergeProgressTitle(existing ? `Merging ${profileName} profile` : `Analyzing ${profileName} profile`);

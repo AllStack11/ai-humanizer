@@ -1,5 +1,45 @@
 import { WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, PROFILE_OPTIONS, DEFAULT_PROFILE_META } from '../constants/index.js';
 
+function isBuiltInProfileId(id) {
+  return PROFILE_OPTIONS.some((profile) => profile.id === id);
+}
+
+function buildLegacyCustomProfileMap(rawCustomProfiles) {
+  if (!Array.isArray(rawCustomProfiles)) return new Map();
+  return new Map(
+    rawCustomProfiles
+      .map((entry) => {
+        const id = typeof entry?.id === "string" ? entry.id.trim() : "";
+        const label = typeof entry?.label === "string" ? entry.label.trim() : "";
+        return id ? [id, label] : null;
+      })
+      .filter(Boolean)
+  );
+}
+
+export function createProfileRecord(profileId, overrides = {}, legacyCustomProfiles = null) {
+  const legacyCustomProfileMap = buildLegacyCustomProfileMap(legacyCustomProfiles);
+  const builtInProfile = PROFILE_OPTIONS.find((profile) => profile.id === profileId);
+  const sampleEntries = Array.isArray(overrides?.sampleEntries)
+    ? overrides.sampleEntries
+        .map((sample, index) => normalizeSampleSlot(sample, index + 1))
+        .filter((sample) => sample.text.trim().length > 0)
+    : [];
+  const fallbackName = builtInProfile?.label || legacyCustomProfileMap.get(profileId) || overrides?.name || "Custom";
+  const isCustom = typeof overrides?.isCustom === "boolean" ? overrides.isCustom : !builtInProfile;
+
+  return {
+    ...overrides,
+    id: profileId,
+    name: typeof overrides?.name === "string" && overrides.name.trim() ? overrides.name.trim() : fallbackName,
+    isCustom,
+    profile: overrides?.profile && typeof overrides.profile === "object" && !Array.isArray(overrides.profile) ? overrides.profile : null,
+    sampleEntries,
+    sampleCount: sampleEntries.length,
+    meta: normalizeProfileMeta(overrides?.meta),
+  };
+}
+
 function normalizeSampleTypeKey(rawValue = "") {
   return String(rawValue)
     .toLowerCase()
@@ -63,33 +103,43 @@ export function normalizeCustomModels(rawCustomModels) {
   return normalized;
 }
 
-export function normalizeStoredStyles(rawStyles) {
+export function normalizeStoredStyles(rawStyles, legacyCustomProfiles = null) {
   const normalized = {};
   const allEntries = Object.entries(rawStyles || {});
   for (const [id, style] of allEntries) {
-    const sampleEntries = Array.isArray(style?.sampleEntries)
-      ? style.sampleEntries
-          .map((sample, i) => normalizeSampleSlot(sample, i + 1))
-          .filter(sample => sample.text.trim().length > 0)
-      : [];
-    const profileName = PROFILE_OPTIONS.find((p) => p.id === id)?.label || style.name || "Custom";
-    normalized[id] = {
-      ...style,
-      id,
-      name: profileName,
-      sampleEntries,
-      sampleCount: sampleEntries.length,
-      meta: normalizeProfileMeta(style.meta),
-    };
+    normalized[id] = createProfileRecord(id, style || {}, legacyCustomProfiles);
   }
   return normalized;
 }
 
-export function normalizeStoredProfileData(rawValue) {
+export function normalizeStoredProfileData(rawValue, legacyCustomProfiles = null) {
+  const mergedLegacyCustomProfiles = rawValue?.customProfiles || legacyCustomProfiles;
+  const styles = normalizeStoredStyles(rawValue?.styles, mergedLegacyCustomProfiles);
+  buildLegacyCustomProfileMap(mergedLegacyCustomProfiles).forEach((label, id) => {
+    if (!styles[id]) {
+      styles[id] = createProfileRecord(id, {
+        name: label || "Custom",
+        isCustom: true,
+        profile: null,
+        sampleEntries: [],
+      });
+    }
+  });
+
   return {
-    styles: normalizeStoredStyles(rawValue?.styles),
+    styles,
     customModels: normalizeCustomModels(rawValue?.customModels),
   };
+}
+
+export function deriveCustomProfiles(styles = {}) {
+  return Object.values(styles || {})
+    .filter((profile) => profile?.isCustom)
+    .map((profile) => ({
+      id: profile.id,
+      label: profile.name || "Custom",
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 export function normalizeProfileMeta(rawMeta) {
