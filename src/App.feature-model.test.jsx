@@ -74,6 +74,12 @@ describe("Feature model routing", () => {
         updatedAt: new Date().toISOString(),
       },
     });
+    localStorage.setItem("cliches-v3", JSON.stringify({
+      generatedTerms: ["delve"],
+      customTerms: [],
+      hiddenTerms: [],
+      updatedAt: new Date().toISOString(),
+    }));
     localStorage.setItem("selected-model-v1", JSON.stringify("google/gemini-2.5-pro"));
     localStorage.setItem("feature-model-v1", JSON.stringify("aion-labs/aion-2.0"));
 
@@ -155,7 +161,7 @@ describe("Feature model routing", () => {
     expect(streamCalls[1][1].payload.model).toBe("google/gemini-2.5-pro");
   });
 
-  test("removes the selected span before partial regen replacement streams in", async () => {
+  test("keeps the original text visible until partial regen replacement starts streaming", async () => {
     let streamCallCount = 0;
     let pendingPartialRequestId = null;
 
@@ -196,7 +202,7 @@ describe("Feature model routing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Trigger partial regen" }));
 
     await waitFor(() => {
-      expect(within(screen.getByLabelText("mock-output-panel")).queryByText("Hello world.")).not.toBeInTheDocument();
+      expect(within(screen.getByLabelText("mock-output-panel")).getByText("Hello world.")).toBeInTheDocument();
       expect(pendingPartialRequestId).toBeTruthy();
     });
 
@@ -261,7 +267,7 @@ Option 2: Second draft.`
     expect(streamCallCount).toBe(3);
   });
 
-  test("shows an error when both partial regen attempts return unusable scaffolding", async () => {
+  test("logs a failure and restores the original output when both partial regen attempts return unusable scaffolding", async () => {
     let streamCallCount = 0;
 
     invokeMock.mockImplementation(async (command, args) => {
@@ -300,12 +306,15 @@ Option 2: Second draft.`;
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Trigger partial regen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open logs drawer" }));
+    const processLog = await screen.findByRole("log", { name: "Process log" });
 
     await waitFor(() => {
-      expect(document.body).toHaveTextContent("Partial regen failed: The model returned no usable replacement text.");
-    });
+      expect(within(screen.getByLabelText("mock-output-panel")).getByText("Hello world.")).toBeInTheDocument();
+      expect(processLog).toHaveTextContent("Partial regeneration failed. Model returned no output.");
+      expect(processLog).toHaveTextContent("The request completed but produced no usable text.");
+    }, { timeout: 6000 });
 
-    expect(within(screen.getByLabelText("mock-output-panel")).queryByText("Hello world.")).not.toBeInTheDocument();
     expect(streamCallCount).toBe(3);
   });
 });

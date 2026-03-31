@@ -3,7 +3,7 @@ import { flushSync } from "react-dom";
 
 // Constants
 import {
-  MODEL_OPTIONS, UTILITY_MODEL, CLICHE_PROMPT,
+  MODEL_OPTIONS, CLICHE_PROMPT,
   TONE_LEVELS, ELAB_DEPTHS,
   MODEL_PREF_KEY, FEATURE_MODEL_PREF_KEY, CUSTOM_PROFILES_KEY,
   WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, PROFILE_OPTIONS, DEFAULT_SLOTS,
@@ -68,6 +68,71 @@ import ResetConfirmModal from './components/ResetConfirmModal.jsx';
 import { Drawer, Modal } from "@mantine/core";
 import { useReducedMotion } from "@mantine/hooks";
 import { Button, Input } from "./components/AppUI.jsx";
+
+const AI_TERMS_STORAGE_KEY = "cliches-v3";
+const AI_TERMS_TIMESTAMP_STORAGE_KEY = "cliches-ts-v3";
+
+function normalizeAiTermList(terms) {
+  if (!Array.isArray(terms)) return [];
+  return [...new Set(
+    terms
+      .map((term) => (typeof term === "string" ? term.trim().toLowerCase() : ""))
+      .filter(Boolean)
+  )];
+}
+
+function normalizeStoredAiTerms(rawTerms, legacyTimestamp = null) {
+  if (Array.isArray(rawTerms)) {
+    return {
+      generatedTerms: normalizeAiTermList(rawTerms),
+      customTerms: [],
+      hiddenTerms: [],
+      updatedAt: typeof legacyTimestamp === "string" ? legacyTimestamp : null,
+    };
+  }
+
+  if (!rawTerms || typeof rawTerms !== "object") {
+    return {
+      generatedTerms: [],
+      customTerms: [],
+      hiddenTerms: [],
+      updatedAt: typeof legacyTimestamp === "string" ? legacyTimestamp : null,
+    };
+  }
+
+  const generatedTerms = normalizeAiTermList(rawTerms.generatedTerms);
+  const customTerms = normalizeAiTermList(rawTerms.customTerms);
+  const hiddenSet = new Set(normalizeAiTermList(rawTerms.hiddenTerms));
+  customTerms.forEach((term) => hiddenSet.delete(term));
+
+  return {
+    generatedTerms,
+    customTerms,
+    hiddenTerms: [...hiddenSet],
+    updatedAt: typeof rawTerms.updatedAt === "string" ? rawTerms.updatedAt : (typeof legacyTimestamp === "string" ? legacyTimestamp : null),
+  };
+}
+
+function buildAiTermsStoragePayload(aiTerms) {
+  return {
+    generatedTerms: normalizeAiTermList(aiTerms?.generatedTerms),
+    customTerms: normalizeAiTermList(aiTerms?.customTerms),
+    hiddenTerms: normalizeAiTermList(aiTerms?.hiddenTerms),
+    updatedAt: typeof aiTerms?.updatedAt === "string" ? aiTerms.updatedAt : null,
+  };
+}
+
+function buildVisibleAiTerms(aiTerms) {
+  const generatedTerms = normalizeAiTermList(aiTerms?.generatedTerms);
+  const customTerms = normalizeAiTermList(aiTerms?.customTerms);
+  const hiddenTerms = new Set(normalizeAiTermList(aiTerms?.hiddenTerms));
+  const customSet = new Set(customTerms);
+
+  return {
+    generatedTerms: generatedTerms.filter((term) => !hiddenTerms.has(term) && !customSet.has(term)),
+    customTerms,
+  };
+}
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
@@ -142,8 +207,8 @@ export default function App() {
   const [addProfileModalOpen, setAddProfileModalOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [newProfileName, setNewProfileName]     = useState("");
-  const [cliches, setCliches]                   = useState([]);
-  const [clichesUpdatedAt, setClichesUpdatedAt] = useState(null);
+  const [aiTerms, setAiTerms]                   = useState(() => normalizeStoredAiTerms(null));
+  const aiTermsRef = useRef(aiTerms);
   const [clicheFetching, setClicheFetching]     = useState(false);
 
   // Writer state (unified)
@@ -229,6 +294,15 @@ export default function App() {
     () => modelOptions.filter((entry) => !MODEL_OPTIONS.some((base) => base.value === entry.value)),
     [modelOptions]
   );
+  const visibleAiTerms = useMemo(() => buildVisibleAiTerms(aiTerms), [aiTerms]);
+  const cliches = useMemo(
+    () => [...visibleAiTerms.generatedTerms, ...visibleAiTerms.customTerms],
+    [visibleAiTerms]
+  );
+  const clichesUpdatedAt = useMemo(
+    () => (aiTerms.updatedAt ? new Date(aiTerms.updatedAt) : null),
+    [aiTerms.updatedAt]
+  );
   const customProfiles = useMemo(() => deriveCustomProfiles(styles), [styles]);
   const availableProfiles = useMemo(() => {
     const builtIns = PROFILE_OPTIONS
@@ -256,6 +330,10 @@ export default function App() {
     () => ({ styles, customModels: customModelOptions }),
     [styles, customModelOptions]
   );
+
+  useEffect(() => {
+    aiTermsRef.current = aiTerms;
+  }, [aiTerms]);
 
 
   function readComposerTextFromDom() {
@@ -374,14 +452,14 @@ export default function App() {
         }).catch(() => {});
 
         const [
-          storedStyles, storedCustomProfiles, storedCliches, storedTs,
+          storedStyles, storedCustomProfiles, storedAiTerms, storedTs,
           storedRuntimeConfig,
           storedModel, storedFeatureModel,
         ] = await Promise.all([
           load("styles-v3"),
           load(CUSTOM_PROFILES_KEY),
-          load("cliches-v3"),
-          load("cliches-ts-v3"),
+          load(AI_TERMS_STORAGE_KEY),
+          load(AI_TERMS_TIMESTAMP_STORAGE_KEY),
           load(RUNTIME_API_CONFIG_KEY),
           load(MODEL_PREF_KEY),
           load(FEATURE_MODEL_PREF_KEY),
@@ -424,8 +502,9 @@ export default function App() {
           untrainedProfileCount: Object.keys(resolvedProfileData.styles).length - trainedProfiles.length,
         }).catch(() => {});
 
-        if (storedCliches) setCliches(storedCliches);
-        if (storedTs)      setClichesUpdatedAt(new Date(storedTs));
+        const normalizedAiTerms = normalizeStoredAiTerms(storedAiTerms, storedTs);
+        aiTermsRef.current = normalizedAiTerms;
+        setAiTerms(normalizedAiTerms);
         const mergedModelOptions = mergeModelOptionsWithSelections(
           resolvedProfileData.customModels,
           typeof storedModel === "string" ? storedModel : "",
@@ -436,8 +515,10 @@ export default function App() {
         if (typeof storedModel === "string" && storedModel.trim()) setSelectedModel(storedModel.trim());
         if (typeof storedFeatureModel === "string" && storedFeatureModel.trim()) setFeatureModel(storedFeatureModel.trim());
 
-        const stale = !storedTs || (Date.now() - new Date(storedTs)) > 3 * 86400000;
-        if (stale) refreshCliches();
+        const latestAiTermsTimestamp = normalizedAiTerms.updatedAt;
+        const hasAnyStoredAiTerms = (normalizedAiTerms.generatedTerms.length + normalizedAiTerms.customTerms.length) > 0;
+        const shouldAutoRefreshAiTerms = !hasAnyStoredAiTerms;
+        if (shouldAutoRefreshAiTerms) refreshCliches(normalizedAiTerms);
 
         let finalApiKeyPresent = false;
         let finalApiKeySource = "missing";
@@ -455,12 +536,12 @@ export default function App() {
         logDiagnosticEvent("app:init:config_loaded", {
           selectedModel: (typeof storedModel === "string" && storedModel.trim()) ? storedModel : MODEL_OPTIONS[0].value,
           featureModel: (typeof storedFeatureModel === "string" && storedFeatureModel.trim()) ? storedFeatureModel : MODEL_OPTIONS[0].value,
-          clichesLoaded: Array.isArray(storedCliches) ? storedCliches.length : 0,
-          clichesUpdatedAt: storedTs || null,
+          clichesLoaded: normalizedAiTerms.generatedTerms.length + normalizedAiTerms.customTerms.length,
+          clichesUpdatedAt: latestAiTermsTimestamp || null,
           writerDraftChars: 0,
           apiKeyPresent: finalApiKeyPresent,
           apiKeySource: finalApiKeySource,
-          clichesRefreshTriggered: stale,
+          clichesRefreshTriggered: shouldAutoRefreshAiTerms,
         }).catch(() => {});
       } catch (error) {
         logDiagnosticEvent("app:init:failed", {}, "failed", {
@@ -845,8 +926,7 @@ export default function App() {
 
       setStyles({});
       setActiveProfileId(PROFILE_OPTIONS[0].id);
-      setCliches([]);
-      setClichesUpdatedAt(null);
+      setAiTerms(normalizeStoredAiTerms(null));
       setClicheFetching(false);
       setMode("humanize");
       setInputText("");
@@ -860,6 +940,7 @@ export default function App() {
       setModelOptions(MODEL_OPTIONS);
       setSelectedModel(MODEL_OPTIONS[0].value);
       setFeatureModel(MODEL_OPTIONS[0].value);
+      setAiTerms(normalizeStoredAiTerms(null));
       setLogsOpen(false);
       setRequestLogs([]);
       setLogsLoading(false);
@@ -883,23 +964,87 @@ export default function App() {
     }
   }
 
+  async function persistAiTerms(nextAiTerms) {
+    const payload = buildAiTermsStoragePayload(nextAiTerms);
+    await save(AI_TERMS_STORAGE_KEY, payload);
+    if (payload.updatedAt) {
+      await save(AI_TERMS_TIMESTAMP_STORAGE_KEY, payload.updatedAt);
+    }
+    aiTermsRef.current = payload;
+    setAiTerms(payload);
+    return payload;
+  }
+
+  async function addCustomCliche(term) {
+    const normalized = normalizeAiTermList([term])[0];
+    if (!normalized) return;
+    const currentAiTerms = aiTermsRef.current;
+    const nextAiTerms = {
+      ...currentAiTerms,
+      customTerms: [...currentAiTerms.customTerms, normalized],
+      hiddenTerms: currentAiTerms.hiddenTerms.filter((entry) => entry !== normalized),
+    };
+    await persistAiTerms(nextAiTerms);
+    setStatus(`Added "${normalized}" to custom AI terms.`);
+    setTimeout(() => setStatus(""), 1600);
+  }
+
+  async function removeCustomCliche(term) {
+    const normalized = normalizeAiTermList([term])[0];
+    if (!normalized) return;
+    const currentAiTerms = aiTermsRef.current;
+    await persistAiTerms({
+      ...currentAiTerms,
+      customTerms: currentAiTerms.customTerms.filter((entry) => entry !== normalized),
+    });
+    setStatus(`Removed "${normalized}" from custom AI terms.`);
+    setTimeout(() => setStatus(""), 1600);
+  }
+
+  async function hideGeneratedCliche(term) {
+    const normalized = normalizeAiTermList([term])[0];
+    if (!normalized) return;
+    const currentAiTerms = aiTermsRef.current;
+    await persistAiTerms({
+      ...currentAiTerms,
+      hiddenTerms: [...currentAiTerms.hiddenTerms, normalized],
+    });
+    setStatus(`Hid "${normalized}" from generated AI terms.`);
+    setTimeout(() => setStatus(""), 1600);
+  }
+
   // ── Clichés ──
-  async function refreshCliches() {
+  async function refreshCliches(currentAiTerms = aiTermsRef.current) {
     setClicheFetching(true);
+    setError("");
     try {
-      const raw = await llm("", CLICHE_PROMPT, 1400, UTILITY_MODEL, runtimeConfig);
+      const raw = await llm("", CLICHE_PROMPT, 1400, featureModel, runtimeConfig);
       const fresh = JSON.parse(raw.replace(/```json|```/g,"").trim());
       if (Array.isArray(fresh) && fresh.length > 20) {
-        const merged = [...new Set(fresh)];
-        setCliches(merged); const now = new Date(); setClichesUpdatedAt(now);
-        await save("cliches-v3", merged); await save("cliches-ts-v3", now.toISOString());
+        const generatedTerms = normalizeAiTermList(fresh);
+        if (generatedTerms.length <= 20) throw new Error("Refresh returned too few usable AI terms.");
+        const nowIso = new Date().toISOString();
+        const latestAiTerms = aiTermsRef.current || currentAiTerms || normalizeStoredAiTerms(null);
+        await persistAiTerms({
+          ...latestAiTerms,
+          generatedTerms,
+          updatedAt: nowIso,
+        });
+        setStatus("AI terms refreshed.");
+        setTimeout(() => setStatus(""), 1800);
+      } else {
+        throw new Error("Refresh returned an unusable AI terms list.");
       }
     } catch (e) {
       const message = getErrorMessage(e);
       if (isMissingApiKeyError(message)) {
         setApiKeyRequired(true);
         setApiKeyModalOpen(true);
+        setError("AI terms refresh needs an API key.");
+      } else {
+        setError(`AI terms refresh failed: ${message}`);
       }
+      setTimeout(() => setError(""), 4000);
     }
     setClicheFetching(false);
   }
@@ -1230,7 +1375,7 @@ export default function App() {
   }
 
   async function regeneratePartial(selectedText, rawStart, rawEnd) {
-    if (isPartialStreaming || loading) return;
+    if (isPartialStreaming || outputPhase === "streaming") return;
     if (!selectedText?.trim() || rawStart < 0 || rawEnd <= rawStart) return;
     const activeProfile = styles[activeProfileId];
     if (!activeProfile) { setError("Onboard your writing profile first."); return; }
@@ -1246,7 +1391,7 @@ export default function App() {
       setIsPartialStreaming(true);
       setPartialRegenText(selectedText);
       setPartialHighlight({ rawStart, rawEnd, phase: "pending" });
-      setOutputText(snapBefore + snapAfter);
+      setOutputText(fullOutputSnapshot);
     });
     try {
       pushProcessStep("Validating profile and selected passage.");
@@ -1257,7 +1402,9 @@ export default function App() {
       const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
       pushProcessStep(filterMsg, "info", filterDetail);
       const systemPrompt = PARTIAL_REGEN_SYS(
-        filteredProfile, toneLevel, stripCliches ? cliches : [],
+        filteredProfile,
+        toneLevel,
+        stripCliches ? visibleAiTerms : [],
         activeProfile.name, activeProfile.meta
       );
       const partialOptions = {
@@ -1278,8 +1425,12 @@ export default function App() {
             userPrompt,
             (_, full) => {
               const sanitized = sanitizePartialRegenOutput(full);
-              const nextOutput = stitchReplacementIntoText(snapBefore, sanitized, snapAfter);
-              const insertedText = nextOutput.slice(snapBefore.length, nextOutput.length - snapAfter.length);
+              const nextOutput = sanitized
+                ? stitchReplacementIntoText(snapBefore, sanitized, snapAfter)
+                : fullOutputSnapshot;
+              const insertedText = sanitized
+                ? nextOutput.slice(snapBefore.length, nextOutput.length - snapAfter.length)
+                : selectedText;
               setOutputText(nextOutput);
               setPartialHighlight({ rawStart, rawEnd: rawStart + insertedText.length, phase: "pending" });
               if (!loggedFirstChunk && sanitized) {
@@ -1329,6 +1480,7 @@ export default function App() {
       logRequestFailure("Partial regeneration failed.", message);
       setError(`Partial regen failed: ${issue.userMessage || message}`);
       setTimeout(() => setError(""), 4000);
+      setOutputText(fullOutputSnapshot);
       clearPartialHighlight();
     } finally {
       setIsPartialStreaming(false);
@@ -1353,7 +1505,7 @@ export default function App() {
       const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
       pushProcessStep(filterMsg, "info", filterDetail);
       const basePrompt = applyPromptDecorators(
-        HUMANIZE_SYS(filteredProfile, toneLevel, stripCliches ? cliches : [], activeProfile.name, activeProfile.meta)
+        HUMANIZE_SYS(filteredProfile, toneLevel, stripCliches ? visibleAiTerms : [], activeProfile.name, activeProfile.meta)
       );
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
@@ -1802,9 +1954,13 @@ export default function App() {
         themeKey={themeKey}
         onThemeChange={setThemeKey}
         clichesUpdatedAt={clichesUpdatedAt}
-        cliches={cliches}
+        generatedTerms={visibleAiTerms.generatedTerms}
+        customTerms={visibleAiTerms.customTerms}
+        hiddenTermsCount={aiTerms.hiddenTerms.length}
         onRefreshCliches={refreshCliches}
-        onUpdateCliches={async (updated) => { setCliches(updated); await save("cliches-v3", updated); }}
+        onAddCustomTerm={addCustomCliche}
+        onRemoveCustomTerm={removeCustomCliche}
+        onHideGeneratedTerm={hideGeneratedCliche}
         clicheFetching={clicheFetching}
         hasProfile={hasProfile}
         isCustomProfile={!!activeProfile?.isCustom}
@@ -1975,3 +2131,9 @@ export {
   outputLooksLikeAnsweredPrompt,
   sanitizePartialRegenOutput,
 } from "./features/humanize/promptGuards.js";
+export {
+  buildAiTermsStoragePayload,
+  buildVisibleAiTerms,
+  normalizeAiTermList,
+  normalizeStoredAiTerms,
+};

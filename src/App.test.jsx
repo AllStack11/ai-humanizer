@@ -2,16 +2,19 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { createTheme, MantineProvider } from "@mantine/core";
 import App, {
   analyzeHumanizeInput,
+  buildAiTermsStoragePayload,
   buildClicheRanges,
   buildDiffSegments,
   buildHumanizeUserPrompt,
   buildMirrorSegments,
+  buildVisibleAiTerms,
   collectCoverageGaps,
   computeProfileHealth,
   computeReadabilityScore,
   computeWordCharDelta,
   countWords,
   getFormatPresetInstruction,
+  normalizeStoredAiTerms,
   normalizeStoredProfileData,
   normalizeStoredStyles,
   outputLooksLikeAnsweredPrompt,
@@ -193,6 +196,46 @@ describe("App utility functions", () => {
     expect(normalized.customModels).toEqual([{ value: "custom/model-two", label: "custom/model-two" }]);
   });
 
+  test("normalizeStoredAiTerms migrates the legacy flat array shape", () => {
+    const normalized = normalizeStoredAiTerms(["Delve", " robust ", "", "Delve"], "2026-03-31T10:00:00.000Z");
+
+    expect(normalized).toEqual({
+      generatedTerms: ["delve", "robust"],
+      customTerms: [],
+      hiddenTerms: [],
+      updatedAt: "2026-03-31T10:00:00.000Z",
+    });
+  });
+
+  test("buildVisibleAiTerms hides removed generated terms and keeps custom terms separate", () => {
+    const visible = buildVisibleAiTerms({
+      generatedTerms: ["delve", "robust", "agentic slop"],
+      customTerms: ["agentic slop", "must-keep"],
+      hiddenTerms: ["robust"],
+    });
+
+    expect(visible).toEqual({
+      generatedTerms: ["delve"],
+      customTerms: ["agentic slop", "must-keep"],
+    });
+  });
+
+  test("buildAiTermsStoragePayload normalizes and preserves the structured AI term shape", () => {
+    const payload = buildAiTermsStoragePayload({
+      generatedTerms: [" Delve ", "robust"],
+      customTerms: ["Must-Keep", "must-keep"],
+      hiddenTerms: ["robust", ""],
+      updatedAt: "2026-03-31T12:00:00.000Z",
+    });
+
+    expect(payload).toEqual({
+      generatedTerms: ["delve", "robust"],
+      customTerms: ["must-keep"],
+      hiddenTerms: ["robust"],
+      updatedAt: "2026-03-31T12:00:00.000Z",
+    });
+  });
+
   test("buildDiffSegments reports insertions and deletions", () => {
     const segments = buildDiffSegments("alpha beta", "alpha gamma beta");
     expect(segments.some((seg) => seg.type === "added" && seg.text.includes("gamma"))).toBe(true);
@@ -254,6 +297,12 @@ describe("App UI", () => {
         writeText: clipboardWriteTextMock,
       },
     });
+    localStorage.setItem("cliches-v3", JSON.stringify({
+      generatedTerms: ["delve"],
+      customTerms: [],
+      hiddenTerms: [],
+      updatedAt: new Date().toISOString(),
+    }));
     localStorage.setItem("cliches-ts-v3", JSON.stringify(new Date().toISOString()));
     streamListener = null;
     scrollIntoViewMock = vi.fn();
@@ -2011,6 +2060,64 @@ describe("App UI", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/The app could not reach OpenRouter\. Check your connection and API URL, then try again\./i);
     fireEvent.click(screen.getByRole("button", { name: "Open logs drawer" }));
     expect(await screen.findByRole("log", { name: "Process log" })).toHaveTextContent("Network request failed.");
+  });
+
+  test("preserves custom AI terms when a manual refresh resolves after the custom term is added", async () => {
+    let resolveRefresh;
+    const refreshPromise = new Promise((resolve) => {
+      resolveRefresh = resolve;
+    });
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") {
+        await refreshPromise;
+        return {
+          content: [{
+            text: JSON.stringify(Array.from({ length: 24 }, (_, i) => `fresh-term-${i + 1}`)),
+          }],
+        };
+      }
+      if (command === "openrouter_chat_stream") {
+        const requestId = args.requestId;
+        streamListener?.({ payload: { requestId, chunk: "Hello ", fullText: "Hello ", done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: "world", fullText: "Hello world.", done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText: "Hello world.", done: true, error: null } });
+        return { ok: true };
+      }
+      return { ok: true };
+    });
+
+    renderWithMantine(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View AI terms" }));
+    const addTermInput = await screen.findByPlaceholderText("Add a term…");
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh AI terms" }));
+    fireEvent.change(addTermInput, {
+      target: { value: "my custom phrase" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add term" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("my custom phrase")).toBeInTheDocument();
+    });
+
+    resolveRefresh();
+
+    await waitFor(() => {
+      expect(screen.getByText("fresh-term-1")).toBeInTheDocument();
+      expect(screen.getByText("my custom phrase")).toBeInTheDocument();
+    });
+
+    const storedTerms = JSON.parse(localStorage.getItem("cliches-v3"));
+    expect(storedTerms.customTerms).toContain("my custom phrase");
+    expect(storedTerms.generatedTerms).toContain("fresh-term-1");
   });
 
   test("keyboard shortcut submits rewrite requests", async () => {

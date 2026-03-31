@@ -30,10 +30,44 @@ export function renderProfileAsProse(profile) {
 
 // Prioritized cliché selector: tier-1 AI fingerprints always appear first
 // so the model always sees the most diagnostic prohibitions regardless of refresh order
+function normalizeTermList(terms) {
+  if (!Array.isArray(terms)) return [];
+  return [...new Set(
+    terms
+      .map((term) => (typeof term === "string" ? term.trim().toLowerCase() : ""))
+      .filter(Boolean)
+  )];
+}
+
+function normalizeClicheInput(cliches) {
+  if (Array.isArray(cliches)) {
+    return { generatedTerms: normalizeTermList(cliches), customTerms: [] };
+  }
+  if (!cliches || typeof cliches !== "object") {
+    return { generatedTerms: [], customTerms: [] };
+  }
+  return {
+    generatedTerms: normalizeTermList(cliches.generatedTerms),
+    customTerms: normalizeTermList(cliches.customTerms),
+  };
+}
+
+function shuffleTerms(terms) {
+  const next = [...terms];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+}
+
 export function selectCliches(cliches, budget = 40) {
+  const { generatedTerms, customTerms } = normalizeClicheInput(cliches);
+  const customSet = new Set(customTerms);
   const prioritized = [
-    ...cliches.filter((c) => TIER1_CLICHES.has(c)),
-    ...cliches.filter((c) => !TIER1_CLICHES.has(c)),
+    ...shuffleTerms(generatedTerms.filter((c) => TIER1_CLICHES.has(c) && !customSet.has(c))),
+    ...shuffleTerms(customTerms),
+    ...shuffleTerms(generatedTerms.filter((c) => !TIER1_CLICHES.has(c) && !customSet.has(c))),
   ];
   return prioritized.slice(0, budget);
 }

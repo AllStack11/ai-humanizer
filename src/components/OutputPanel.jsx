@@ -83,6 +83,7 @@ function OutputDisplayEditor({
   onSelectionClear,
   onClearCompletedHighlight,
   containerRef,
+  enableSelectionActions = true,
 }) {
   const wrapperRef = useRef(null);
 
@@ -150,7 +151,7 @@ function OutputDisplayEditor({
 
   // Live selection → CSS class on wrapper only (no React state → no re-render → selection never disrupted)
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || !enableSelectionActions) return;
     function onSelectionUpdate({ editor: ed }) {
       const { from, to } = ed.state.selection;
       if (from === to) { wrapperRef.current?.classList.remove("has-valid-selection"); return; }
@@ -167,7 +168,7 @@ function OutputDisplayEditor({
 
   // Tooltip on pointer release (single state update, after selection is final)
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || !enableSelectionActions) return;
     function onPointerUp() {
       if (isPartialStreaming) return;
       const { from, to } = editor.state.selection;
@@ -208,7 +209,7 @@ function OutputDisplayEditor({
     }
     document.addEventListener("pointerup", onPointerUp);
     return () => document.removeEventListener("pointerup", onPointerUp);
-  }, [editor, isPartialStreaming, outputText, onClearCompletedHighlight]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editor, enableSelectionActions, isPartialStreaming, outputText, onClearCompletedHighlight]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={wrapperRef} className="output-display-editor-wrap">
@@ -750,6 +751,7 @@ export default function OutputPanel({
   const estimatedOutputTokens = useMemo(() => estimateTokenCount(outputText), [outputText]);
   const outputTokenCount = outputUsage?.completionTokens ?? estimatedOutputTokens;
   const outputTokenIsEstimated = outputUsage?.completionTokens == null;
+  const originalWords = useMemo(() => countPanelWords(originalText), [originalText]);
 
   useEffect(() => {
     if (!isStreaming) {
@@ -833,14 +835,53 @@ export default function OutputPanel({
 
         <div className={`output-stream-box-wrap${compareOpen ? " output-stream-box-wrap--compare" : ""}`}>
           <div className={`output-source-card${compareOpen ? " output-source-card--compare" : ""}`} role="note" aria-label="Original user input">
-            <div className="output-source-head">
-              <span className="text-mono output-source-badge">User text</span>
-            </div>
-            <p className="output-source-text">
-              {originalText?.trim()
-                ? (compareOpen ? originalText.trim() : originalText.trim().slice(0, 220))
-                : "No input provided"}
-            </p>
+            {compareOpen ? (
+              <div className="output-editor-shell output-source-shell">
+                <div className="output-stream-box-shell">
+                  <div className="output-stream-box-tools output-stream-box-tools--static">
+                    <div className="output-stream-labels">
+                      <span className="text-mono output-role-label">User text</span>
+                    </div>
+                  </div>
+                  <div
+                    className="output-stream-box output-markdown-view output-source-box"
+                    aria-label="Original user input"
+                    role="region"
+                  >
+                    {originalText?.trim() ? (
+                      <OutputDisplayEditor
+                        outputText={originalText}
+                        cliches={[]}
+                        lockedHighlight={null}
+                        rawHighlight={null}
+                        isPartialStreaming={false}
+                        onSelectionReady={() => {}}
+                        onSelectionClear={() => {}}
+                        onClearCompletedHighlight={() => {}}
+                        containerRef={outputZoneRef}
+                        enableSelectionActions={false}
+                      />
+                    ) : (
+                      <p className="output-markdown-placeholder">No input provided</p>
+                    )}
+                  </div>
+                </div>
+                <div className="editor-meta-outside" aria-hidden="true">
+                  <span className="text-mono editor-meta-outside-item">{originalWords} words</span>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="output-source-head">
+                  <span className="text-mono output-source-badge">User text</span>
+                </div>
+                <p className="output-source-text">
+                  {originalText?.trim()
+                    ? originalText.trim().slice(0, 220)
+                    : "No input provided"}
+                </p>
+              </>
+            )}
           </div>
           <div className="output-llm-column">
             <div className="output-editor-shell">

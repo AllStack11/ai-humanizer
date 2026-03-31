@@ -11,9 +11,13 @@ export default function ManagementPanel({
   themeKey,
   onThemeChange,
   clichesUpdatedAt,
-  cliches,
+  generatedTerms,
+  customTerms,
+  hiddenTermsCount = 0,
   onRefreshCliches,
-  onUpdateCliches,
+  onAddCustomTerm,
+  onRemoveCustomTerm,
+  onHideGeneratedTerm,
   clicheFetching,
   hasProfile,
   isCustomProfile,
@@ -27,6 +31,21 @@ export default function ManagementPanel({
   const importInputRef = useRef(null);
   const [clicheListOpen, setClicheListOpen] = useState(false);
   const [newTerm, setNewTerm] = useState("");
+  const totalTerms = generatedTerms.length + customTerms.length;
+  const refreshLabel = clichesUpdatedAt
+    ? `Last refreshed ${clichesUpdatedAt.toLocaleString()}`
+    : "Not refreshed yet";
+  const normalizedNewTerm = newTerm.trim().toLowerCase();
+  const termExists = generatedTerms.includes(normalizedNewTerm) || customTerms.includes(normalizedNewTerm);
+
+  const handleAddTerm = () => {
+    if (!normalizedNewTerm || termExists) {
+      setNewTerm("");
+      return;
+    }
+    onAddCustomTerm(normalizedNewTerm);
+    setNewTerm("");
+  };
 
   return (
     <div className="panel-grid controls-panel">
@@ -42,7 +61,7 @@ export default function ManagementPanel({
             data={(modelOptions || []).map((model) => ({ value: model.value, label: model.label }))}
             className="app-select-wrap"
           />
-          <Text className="text-mono" size="xs">Used for profile generation and highlighted regeneration.</Text>
+          <Text className="text-mono" size="xs">Used for profile generation, AI terms refresh, and highlighted regeneration.</Text>
         </Card.Content>
       </Card>
 
@@ -66,7 +85,13 @@ export default function ManagementPanel({
           <label className="panel-title">
             AI Terms
           </label>
-          <Text className="text-mono" size="xs">{clichesUpdatedAt ? `${cliches.length} terms · ${clichesUpdatedAt.toLocaleDateString()}` : "Not loaded yet"}</Text>
+          <Text className="text-mono" size="xs">
+            {clicheFetching ? "Refreshing AI terms..." : `${totalTerms} active terms`}
+          </Text>
+          <Text className="text-mono" size="xs">{refreshLabel}</Text>
+          {hiddenTermsCount ? (
+            <Text className="text-mono" size="xs">{hiddenTermsCount} generated term{hiddenTermsCount === 1 ? "" : "s"} hidden locally</Text>
+          ) : null}
           <div className="toolbar-row">
             <Button variant="bordered" onPress={onRefreshCliches} isDisabled={clicheFetching} aria-label="Refresh AI terms" tooltip="Refresh the AI-term filter list" iconOnly>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -176,86 +201,135 @@ export default function ManagementPanel({
       <Modal
         opened={clicheListOpen}
         onClose={() => { setClicheListOpen(false); setNewTerm(""); }}
-        title={<strong>AI Terms ({cliches.length})</strong>}
+        title={<strong>AI Terms ({totalTerms})</strong>}
         zIndex={500}
         scrollAreaComponent="div"
         styles={{ body: { maxHeight: "60vh", overflowY: "auto" } }}
       >
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", padding: "4px 0 12px" }}>
-          {cliches.map((term, i) => (
-            <span
-              key={i}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "2px 6px 2px 8px",
-                borderRadius: 4,
-                border: "1px solid var(--app-border, rgba(255,255,255,0.12))",
-                background: "var(--app-surface, rgba(255,255,255,0.04))",
-              }}
-            >
-              <Text size="xs" className="text-mono">{term}</Text>
+        <div className="panel-grid" style={{ gap: 16 }}>
+          <section className="panel-grid" style={{ gap: 8 }}>
+            <Text size="xs" className="text-mono">Custom terms ({customTerms.length})</Text>
+            {customTerms.length ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                {customTerms.map((term) => (
+                  <span
+                    key={`custom-${term}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "2px 6px 2px 8px",
+                      borderRadius: 4,
+                      border: "1px solid var(--app-border, rgba(255,255,255,0.12))",
+                      background: "var(--app-surface, rgba(255,255,255,0.04))",
+                    }}
+                  >
+                    <Text size="xs" className="text-mono">{term}</Text>
+                    <button
+                      aria-label={`Remove custom term ${term}`}
+                      onClick={() => onRemoveCustomTerm(term)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        opacity: 0.5,
+                        lineHeight: 1,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
+                      onMouseLeave={(e) => (e.currentTarget.style.opacity = 0.5)}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                      </svg>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <Text size="xs" c="#8b7f70">Add your own phrases here to force them into the AI-term prompt.</Text>
+            )}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <TextInput
+                placeholder="Add a term…"
+                value={newTerm}
+                onChange={(e) => setNewTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    handleAddTerm();
+                  }
+                }}
+                size="xs"
+                style={{ flex: 1 }}
+                classNames={{ input: "text-mono" }}
+              />
               <button
-                aria-label={`Remove ${term}`}
-                onClick={() => onUpdateCliches(cliches.filter((_, j) => j !== i))}
+                aria-label="Add term"
+                onClick={handleAddTerm}
                 style={{
                   background: "none",
-                  border: "none",
-                  padding: 0,
+                  border: "1px solid var(--app-border, rgba(255,255,255,0.15))",
+                  borderRadius: 4,
+                  padding: "4px 8px",
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
-                  opacity: 0.5,
-                  lineHeight: 1,
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
-                onMouseLeave={(e) => (e.currentTarget.style.opacity = 0.5)}
               >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                  <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M12 5v14" /><path d="M5 12h14" />
                 </svg>
               </button>
-            </span>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <TextInput
-            placeholder="Add a term…"
-            value={newTerm}
-            onChange={(e) => setNewTerm(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                const t = newTerm.trim().toLowerCase();
-                if (t && !cliches.includes(t)) { onUpdateCliches([...cliches, t]); }
-                setNewTerm("");
-              }
-            }}
-            size="xs"
-            style={{ flex: 1 }}
-            classNames={{ input: "text-mono" }}
-          />
-          <button
-            aria-label="Add term"
-            onClick={() => {
-              const t = newTerm.trim().toLowerCase();
-              if (t && !cliches.includes(t)) { onUpdateCliches([...cliches, t]); }
-              setNewTerm("");
-            }}
-            style={{
-              background: "none",
-              border: "1px solid var(--app-border, rgba(255,255,255,0.15))",
-              borderRadius: 4,
-              padding: "4px 8px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <path d="M12 5v14" /><path d="M5 12h14" />
-            </svg>
-          </button>
+            </div>
+          </section>
+
+          <section className="panel-grid" style={{ gap: 8 }}>
+            <Text size="xs" className="text-mono">Generated terms ({generatedTerms.length})</Text>
+            {generatedTerms.length ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                {generatedTerms.map((term) => (
+                  <span
+                    key={`generated-${term}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "2px 6px 2px 8px",
+                      borderRadius: 4,
+                      border: "1px solid var(--app-border, rgba(255,255,255,0.12))",
+                      background: "var(--app-surface, rgba(255,255,255,0.04))",
+                    }}
+                  >
+                    <Text size="xs" className="text-mono">{term}</Text>
+                    <button
+                      aria-label={`Hide generated term ${term}`}
+                      onClick={() => onHideGeneratedTerm(term)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        opacity: 0.5,
+                        lineHeight: 1,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
+                      onMouseLeave={(e) => (e.currentTarget.style.opacity = 0.5)}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                      </svg>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <Text size="xs" c="#8b7f70">No generated terms available yet. Refresh to fetch a fresh list.</Text>
+            )}
+          </section>
         </div>
       </Modal>
     </div>

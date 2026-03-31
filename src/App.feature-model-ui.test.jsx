@@ -78,6 +78,12 @@ describe("Feature model UI and persistence", () => {
         writeText: clipboardWriteTextMock,
       },
     });
+    localStorage.setItem("cliches-v3", JSON.stringify({
+      generatedTerms: ["delve"],
+      customTerms: [],
+      hiddenTerms: [],
+      updatedAt: new Date().toISOString(),
+    }));
     localStorage.setItem("cliches-ts-v3", JSON.stringify(new Date().toISOString()));
     clipboardWriteTextMock.mockResolvedValue();
     clipboardReadTextMock.mockResolvedValue("");

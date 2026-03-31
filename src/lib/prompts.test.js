@@ -87,6 +87,20 @@ describe("renderProfileAsProse", () => {
 // ─── selectCliches ────────────────────────────────────────────────────────────
 
 describe("selectCliches", () => {
+  test("returns different sampled non-tier-1 terms across runs when over budget", () => {
+    const generatedTerms = ["delve", ...Array.from({ length: 60 }, (_, i) => `generated-${i}`)];
+    const first = selectCliches({ generatedTerms, customTerms: [] }, 40);
+    const second = selectCliches({ generatedTerms, customTerms: [] }, 40);
+
+    expect(first).toHaveLength(40);
+    expect(second).toHaveLength(40);
+    expect(first).toContain("delve");
+    expect(second).toContain("delve");
+    expect(first.filter((term) => term.startsWith("generated-"))).not.toEqual(
+      second.filter((term) => term.startsWith("generated-"))
+    );
+  });
+
   test("returns at most budget items", () => {
     const list = Array.from({ length: 60 }, (_, i) => `phrase${i}`);
     expect(selectCliches(list, 40)).toHaveLength(40);
@@ -99,7 +113,7 @@ describe("selectCliches", () => {
     // Put non-tier-1 first to verify reordering
     const input = [nonTier1, tier1Item];
     const result = selectCliches(input, 5);
-    expect(result.indexOf(tier1Item)).toBeLessThan(result.indexOf(nonTier1));
+    expect(result).toEqual([tier1Item, nonTier1]);
   });
 
   test("all returned items are from TIER1_CLICHES when input is only tier-1 terms", () => {
@@ -114,7 +128,32 @@ describe("selectCliches", () => {
 
   test("returns all items when list is smaller than budget", () => {
     const small = ["delve", "certainly"];
-    expect(selectCliches(small, 40)).toEqual(["delve", "certainly"]);
+    const result = selectCliches(small, 40);
+    expect(result).toHaveLength(2);
+    expect(result).toContain("delve");
+    expect(result).toContain("certainly");
+  });
+
+  test("custom terms appear before non-tier-1 generated terms", () => {
+    const result = selectCliches({
+      generatedTerms: ["in conclusion", "delve", "moving forward"],
+      customTerms: ["agentic slop"],
+    }, 10);
+
+    expect(result).toContain("delve");
+    expect(result).toContain("agentic slop");
+    expect(result.indexOf("delve")).toBeLessThan(result.indexOf("in conclusion"));
+    expect(result.indexOf("agentic slop")).toBeLessThan(result.indexOf("in conclusion"));
+  });
+
+  test("custom terms survive the budget cutoff", () => {
+    const generatedTerms = ["delve", ...Array.from({ length: 45 }, (_, i) => `generated-${i}`)];
+    const result = selectCliches({ generatedTerms, customTerms: ["must-keep"] }, 40);
+    const firstGeneratedIndex = result.findIndex((term) => term.startsWith("generated-"));
+
+    expect(result).toContain("must-keep");
+    expect(firstGeneratedIndex).toBeGreaterThan(-1);
+    expect(result.indexOf("must-keep")).toBeLessThan(firstGeneratedIndex);
   });
 });
 
@@ -272,5 +311,22 @@ describe("cliché prioritization in generated prompts", () => {
     expect(delvePos).toBeGreaterThan(-1);
     expect(conclusionPos).toBeGreaterThan(-1);
     expect(delvePos).toBeLessThan(conclusionPos);
+  });
+
+  test("custom clichés are included ahead of non-tier-1 generated terms in prompts", () => {
+    const cliches = {
+      generatedTerms: ["in conclusion", "moving forward", "delve"],
+      customTerms: ["agentic slop"],
+    };
+    const prompt = HUMANIZE_SYS({ tone: "casual" }, 2, cliches);
+    const delvePos = prompt.indexOf('"delve"');
+    const customPos = prompt.indexOf('"agentic slop"');
+    const conclusionPos = prompt.indexOf('"in conclusion"');
+
+    expect(delvePos).toBeGreaterThan(-1);
+    expect(customPos).toBeGreaterThan(-1);
+    expect(conclusionPos).toBeGreaterThan(-1);
+    expect(delvePos).toBeLessThan(customPos);
+    expect(customPos).toBeLessThan(conclusionPos);
   });
 });
