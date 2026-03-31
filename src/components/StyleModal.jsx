@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import { Modal, NativeSelect } from "@mantine/core";
 import { Button, Card, TextArea } from "./AppUI.jsx";
-import { load, save } from "../lib/storage.js";
 import { normalizeSampleSlot, getFilledSlots, resolveSampleType } from "../utils/profile.js";
-import { WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, DEFAULT_SLOTS, STYLE_MODAL_DRAFT_KEY, PROFILE_GOAL_OPTIONS, PROFILE_DOMAIN_OPTIONS } from "../constants/index.js";
+import { WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, DEFAULT_SLOTS, PROFILE_GOAL_OPTIONS, PROFILE_DOMAIN_OPTIONS } from "../constants/index.js";
 
 function ModalIcon({ children }) {
   return (
@@ -60,50 +59,25 @@ export default function StyleModal({ profileId, hasProfile, loading, health, pro
   }
 
   useEffect(() => {
-    (async () => {
-      if (!hasProfile) {
-        setTrainSlots(initialSlots);
-        setPoolInput("");
-        setPoolType(DEFAULT_SAMPLE_TYPE);
-        return;
-      }
-      const draft = await load(`${STYLE_MODAL_DRAFT_KEY}:${profileId}`);
-      if (!draft || typeof draft !== "object") {
-        if (sampleEntries.length) {
-          setTrainSlots(sampleEntries.map((slot, index) => normalizeSampleSlot(slot, index + 1)));
-        }
-        return;
-      }
-      if (Array.isArray(draft.trainSlots) && draft.trainSlots.length) {
-        const normalizedSlots = draft.trainSlots.map((slot, index) => normalizeSampleSlot(slot, index + 1));
-        setTrainSlots(normalizedSlots);
-      } else if (Array.isArray(draft.trainSlots) && !draft.trainSlots.length) {
-        if (sampleEntries.length) {
-          setTrainSlots(sampleEntries.map((slot, index) => normalizeSampleSlot(slot, index + 1)));
-        } else {
-          setTrainSlots(initialSlots);
-        }
-      }
-      if (typeof draft.poolInput === "string") setPoolInput(draft.poolInput);
-      if (typeof draft.poolType === "string") setPoolType(resolveSampleType(draft.poolType));
-    })();
-  }, [hasProfile]);
-
-  useEffect(() => {
-    if (!profileId) return;
-    save(`${STYLE_MODAL_DRAFT_KEY}:${profileId}`, {
-      trainSlots,
-      poolInput,
-      poolType,
-      updatedAt: new Date().toISOString(),
-    });
-  }, [trainSlots, poolInput, poolType, profileId]);
+    if (!hasProfile) {
+      setTrainSlots(initialSlots);
+      setPoolInput("");
+      setPoolType(DEFAULT_SAMPLE_TYPE);
+      return;
+    }
+    if (sampleEntries.length) {
+      setTrainSlots(sampleEntries.map((slot, index) => normalizeSampleSlot(slot, index + 1)));
+    } else {
+      setTrainSlots(initialSlots);
+    }
+    setPoolInput("");
+    setPoolType(DEFAULT_SAMPLE_TYPE);
+  }, [hasProfile, sampleEntries, profileId]);
 
   function resetDraft() {
     setTrainSlots(initialSlots);
     setPoolInput("");
     setPoolType(DEFAULT_SAMPLE_TYPE);
-    save(`${STYLE_MODAL_DRAFT_KEY}:${profileId}`, null);
   }
 
   function removeSlot(id) {

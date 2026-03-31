@@ -1,5 +1,3 @@
-export const WRITER_DRAFT_KEY = "writer-editor-draft-v1";
-export const STYLE_MODAL_DRAFT_KEY = "style-modal-draft-v1";
 export const MODEL_PREF_KEY = "selected-model-v1";
 export const FEATURE_MODEL_PREF_KEY = "feature-model-v1";
 export const CUSTOM_PROFILES_KEY = "custom-profiles-v1";

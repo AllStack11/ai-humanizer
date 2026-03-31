@@ -5,7 +5,7 @@ import { flushSync } from "react-dom";
 import {
   MODEL_OPTIONS, UTILITY_MODEL, CLICHE_PROMPT,
   TONE_LEVELS, ELAB_DEPTHS,
-  WRITER_DRAFT_KEY, STYLE_MODAL_DRAFT_KEY, MODEL_PREF_KEY, FEATURE_MODEL_PREF_KEY, CUSTOM_PROFILES_KEY,
+  MODEL_PREF_KEY, FEATURE_MODEL_PREF_KEY, CUSTOM_PROFILES_KEY,
   WRITING_SAMPLE_TYPES, DEFAULT_SAMPLE_TYPE, PROFILE_OPTIONS, DEFAULT_SLOTS,
   OUTPUT_PRESET_OPTIONS, APP_THEME_OPTIONS,
 } from './constants/index.js';
@@ -375,14 +375,13 @@ export default function App() {
 
         const [
           storedStyles, storedCustomProfiles, storedCliches, storedTs,
-          storedWriterDraft, storedRuntimeConfig,
+          storedRuntimeConfig,
           storedModel, storedFeatureModel,
         ] = await Promise.all([
           load("styles-v3"),
           load(CUSTOM_PROFILES_KEY),
           load("cliches-v3"),
           load("cliches-ts-v3"),
-          load(`${WRITER_DRAFT_KEY}:${PROFILE_OPTIONS[0].id}`),
           load(RUNTIME_API_CONFIG_KEY),
           load(MODEL_PREF_KEY),
           load(FEATURE_MODEL_PREF_KEY),
@@ -427,7 +426,6 @@ export default function App() {
 
         if (storedCliches) setCliches(storedCliches);
         if (storedTs)      setClichesUpdatedAt(new Date(storedTs));
-        if (typeof storedWriterDraft === "string") setInputText(storedWriterDraft);
         const mergedModelOptions = mergeModelOptionsWithSelections(
           resolvedProfileData.customModels,
           typeof storedModel === "string" ? storedModel : "",
@@ -459,7 +457,7 @@ export default function App() {
           featureModel: (typeof storedFeatureModel === "string" && storedFeatureModel.trim()) ? storedFeatureModel : MODEL_OPTIONS[0].value,
           clichesLoaded: Array.isArray(storedCliches) ? storedCliches.length : 0,
           clichesUpdatedAt: storedTs || null,
-          writerDraftChars: typeof storedWriterDraft === "string" ? storedWriterDraft.length : 0,
+          writerDraftChars: 0,
           apiKeyPresent: finalApiKeyPresent,
           apiKeySource: finalApiKeySource,
           clichesRefreshTriggered: stale,
@@ -552,13 +550,6 @@ export default function App() {
   }, [backupStatus, backupLastSavedAt]);
   useEffect(() => { save(MODEL_PREF_KEY, selectedModel); }, [selectedModel]);
   useEffect(() => { save(FEATURE_MODEL_PREF_KEY, featureModel); }, [featureModel]);
-  useEffect(() => { save(`${WRITER_DRAFT_KEY}:${activeProfileId}`, inputText); }, [inputText]);
-  useEffect(() => {
-    if (!backupSyncReadyRef.current) return;
-    load(`${WRITER_DRAFT_KEY}:${activeProfileId}`).then(draft => {
-      setInputText(typeof draft === "string" ? draft : "");
-    });
-  }, [activeProfileId]);
 
   function addCustomModelFromDropdown() {
     setAddModelModalOpen(true);
@@ -675,9 +666,6 @@ export default function App() {
       return;
     }
 
-    await save(`${STYLE_MODAL_DRAFT_KEY}:${activeProfileId}`, null);
-    await save(`${WRITER_DRAFT_KEY}:${activeProfileId}`, null);
-
     const nextStyles = {
       ...styles,
       [activeProfileId]: {
@@ -790,8 +778,6 @@ export default function App() {
     const nextStyles = { ...styles };
     delete nextStyles[activeProfileId];
 
-    await save(`${WRITER_DRAFT_KEY}:${activeProfileId}`, null);
-    await save(`${STYLE_MODAL_DRAFT_KEY}:${activeProfileId}`, null);
     setStyles(nextStyles);
     await save("styles-v3", { styles: nextStyles, customModels: customModelOptions });
     await saveStylesBackupWithRetry({ styles: nextStyles, customModels: customModelOptions });

@@ -36,7 +36,7 @@ export default function ResetConfirmModal({ onClose, onConfirm }) {
       <ul style={{ margin: "0 0 16px 0", paddingLeft: 18, fontSize: 13, lineHeight: 1.7 }}>
         <li>All writing profiles (custom profiles deleted, built-in profiles reset)</li>
         <li>Output history and session data</li>
-        <li>Saved drafts and preferences</li>
+        <li>Saved preferences</li>
         <li>API key (stored on disk)</li>
         <li>Style backups</li>
         <li>Debug logs and request history</li>

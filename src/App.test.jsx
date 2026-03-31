@@ -322,6 +322,33 @@ describe("App UI", () => {
     });
   });
 
+  test("starts with a clear editor after app remount even if the previous session had input", async () => {
+    setStoredProfileData({
+      personal: {
+        id: "personal",
+        name: "Personal",
+        profile: { tone: "balanced" },
+        sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
+        sampleCount: 1,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+
+    const firstRender = renderWithMantine(<App />);
+    const firstEditor = await screen.findByPlaceholderText("Paste AI-generated text here…");
+    fireEvent.change(firstEditor, {
+      target: { value: "Draft from the first mounted app session." },
+    });
+    expect(firstEditor).toHaveValue("Draft from the first mounted app session.");
+
+    firstRender.unmount();
+
+    renderWithMantine(<App />);
+    const secondEditor = await screen.findByPlaceholderText("Paste AI-generated text here…");
+    expect(secondEditor).toHaveValue("");
+    expect(secondEditor).not.toHaveValue("Draft from the first mounted app session.");
+  });
+
   test("streams and applies one-off instructions plus output presets", async () => {
     setStoredProfileData({
         personal: {
