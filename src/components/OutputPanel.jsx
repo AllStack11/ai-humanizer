@@ -795,112 +795,123 @@ export default function OutputPanel({
             )}
           </div>
           <div className="output-llm-column">
-            <div className="output-editor-shell">
-              <div className="output-stream-box-shell">
-                <div className="output-stream-box-tools">
-                  <div className="output-stream-labels">
-                    <span className="text-mono output-role-label">LLM output</span>
-                    {outputLikelyHitTokenLimit ? (
-                      <span className="text-mono output-token-cap-badge" role="status" aria-label="Response may be truncated by token limit">
-                        Near token limit
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="output-stream-actions">
-                  <div className="output-feedback-trigger">
-                    <div className={`output-feedback-slideout${feedbackOpen ? " is-open" : ""}`}>
-                      <textarea
-                        className="output-regenerate-feedback-input"
-                        value={feedbackText}
-                        onChange={(event) => setFeedbackText(event.target.value)}
-                        aria-label="Regenerate feedback input"
-                        placeholder="Add feedback for the next regeneration."
-                        rows={3}
-                      />
-                      <div className="toolbar-row output-regenerate-feedback-actions">
-                        <Button
-                          size="sm"
-                          variant="solid"
-                          color="primary"
-                          onPress={submitRegenerateWithFeedback}
-                          isDisabled={!feedbackText.trim() || isStreaming}
-                          aria-label="Regenerate with feedback"
-                          tooltip="Regenerate with feedback"
-                          iconOnly
-                        >
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M21 2v6h-6" />
-                            <path d="M3 22v-6h6" />
-                            <path d="M3.51 9a9 9 0 0 1 14.13-3.36L21 8" />
-                            <path d="M20.49 15a9 9 0 0 1-14.13 3.36L3 16" />
-                          </svg>
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="bordered"
-                          onPress={() => {
-                            setFeedbackOpen(false);
-                            setFeedbackText("");
-                          }}
-                          aria-label="Cancel regenerate feedback"
-                          tooltip="Cancel"
-                          iconOnly
-                        >
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M18 6 6 18" />
-                            <path d="m6 6 12 12" />
-                          </svg>
-                        </Button>
-                      </div>
+            <div className="output-llm-panel">
+              <div className="output-editor-shell">
+                <div className="output-stream-box-shell">
+                  <div className="output-stream-box-tools">
+                    <div className="output-stream-labels">
+                      <span className="text-mono output-role-label">LLM output</span>
+                      {outputLikelyHitTokenLimit ? (
+                        <span className="text-mono output-token-cap-badge" role="status" aria-label="Response may be truncated by token limit">
+                          Near token limit
+                        </span>
+                      ) : null}
                     </div>
-                    <Button
-                      className="output-stream-copy"
-                      variant={feedbackOpen ? "solid" : "bordered"}
-                      color={feedbackOpen ? "primary" : "default"}
-                      size="sm"
-                      onPress={() => {
-                        setFeedbackOpen((prev) => !prev);
-                        if (feedbackOpen) setFeedbackText("");
-                      }}
-                      isDisabled={isStreaming || !originalText?.trim()}
-                      aria-label={feedbackOpen ? "Hide regenerate feedback" : "Open regenerate feedback"}
-                      tooltip={feedbackOpen ? "Hide feedback input" : "Regenerate with feedback"}
-                      iconOnly
+                  </div>
+                  <div className="output-regen-zone" ref={outputZoneRef}>
+                    <div
+                      className={`output-stream-box output-markdown-view${isStreaming ? " is-streaming" : ""}${streamPulse ? " output-stream-box--pulse" : ""}`}
+                      aria-label="LLM output"
+                      role="region"
                     >
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M21 2v6h-6" />
-                        <path d="M3 22v-6h6" />
-                        <path d="M3.51 9a9 9 0 0 1 14.13-3.36L21 8" />
-                        <path d="M20.49 15a9 9 0 0 1-14.13 3.36L3 16" />
-                        <path d="M8 12h8" />
-                      </svg>
-                    </Button>
+                      {outputText?.trim() ? (
+                        isStreaming ? (
+                          <>
+                            <div className="output-markdown-content" dangerouslySetInnerHTML={{ __html: streamingHtml }} />
+                            <span className="output-stream-caret" aria-hidden="true" />
+                          </>
+                        ) : (
+                          <OutputDisplayEditor
+                            outputText={outputText}
+                            cliches={cliches}
+                            lockedHighlight={lockedHighlight}
+                            rawHighlight={partialHighlight}
+                            isPartialStreaming={isPartialStreaming}
+                            onSelectionReady={setTooltip}
+                            onSelectionClear={() => setTooltip(null)}
+                            onClearCompletedHighlight={onClearPartialHighlight}
+                            containerRef={outputZoneRef}
+                          />
+                        )
+                      ) : (
+                        <p className="output-markdown-placeholder">
+                          {isStreaming ? "Waiting for model output..." : "Generated response"}
+                        </p>
+                      )}
+                    </div>
+                    <SelectionRegenTooltip
+                      tooltip={tooltip}
+                      isLoading={isPartialStreaming}
+                      onRegenerate={handlePartialRegen}
+                      onDismiss={() => setTooltip(null)}
+                      containerRef={outputZoneRef}
+                    />
+                  </div>
+                </div>
+                <div className="editor-meta-outside" aria-hidden="true">
+                  <span className="text-mono editor-meta-outside-item">{outputWords} words</span>
+                </div>
+              </div>
+
+              <div className="output-stream-actions output-stream-actions--sidebar" aria-label="Output actions" role="toolbar">
+                <div className="output-feedback-trigger">
+                  <div className={`output-feedback-slideout${feedbackOpen ? " is-open" : ""}`}>
+                    <textarea
+                      className="output-regenerate-feedback-input"
+                      value={feedbackText}
+                      onChange={(event) => setFeedbackText(event.target.value)}
+                      aria-label="Regenerate feedback input"
+                      placeholder="Add feedback for the next regeneration."
+                      rows={3}
+                    />
+                    <div className="toolbar-row output-regenerate-feedback-actions">
+                      <Button
+                        size="sm"
+                        variant="solid"
+                        color="primary"
+                        onPress={submitRegenerateWithFeedback}
+                        isDisabled={!feedbackText.trim() || isStreaming}
+                        aria-label="Regenerate with feedback"
+                        tooltip="Regenerate with feedback"
+                        iconOnly
+                      >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M21 2v6h-6" />
+                          <path d="M3 22v-6h6" />
+                          <path d="M3.51 9a9 9 0 0 1 14.13-3.36L21 8" />
+                          <path d="M20.49 15a9 9 0 0 1-14.13 3.36L3 16" />
+                        </svg>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="bordered"
+                        onPress={() => {
+                          setFeedbackOpen(false);
+                          setFeedbackText("");
+                        }}
+                        aria-label="Cancel regenerate feedback"
+                        tooltip="Cancel"
+                        iconOnly
+                      >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M18 6 6 18" />
+                          <path d="m6 6 12 12" />
+                        </svg>
+                      </Button>
+                    </div>
                   </div>
                   <Button
                     className="output-stream-copy"
-                    variant={compareOpen ? "solid" : "bordered"}
-                    color={compareOpen ? "primary" : "default"}
+                    variant={feedbackOpen ? "solid" : "bordered"}
+                    color={feedbackOpen ? "primary" : "default"}
                     size="sm"
-                    onPress={() => setCompareOpen((prev) => !prev)}
-                    isDisabled={!originalText?.trim() && !outputText?.trim()}
-                    aria-label={compareOpen ? "Close side by side comparison" : "Open side by side comparison"}
-                    tooltip={compareOpen ? "Close compare view" : "Compare user vs LLM"}
-                    iconOnly
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <rect x="3" y="4" width="8" height="16" rx="1.5" />
-                      <rect x="13" y="4" width="8" height="16" rx="1.5" />
-                    </svg>
-                  </Button>
-                  <Button
-                    className="output-stream-copy"
-                    variant="bordered"
-                    color="default"
-                    size="sm"
-                    onPress={onRegenerate}
+                    onPress={() => {
+                      setFeedbackOpen((prev) => !prev);
+                      if (feedbackOpen) setFeedbackText("");
+                    }}
                     isDisabled={isStreaming || !originalText?.trim()}
-                    aria-label="Regenerate output"
-                    tooltip="Regenerate output"
+                    aria-label={feedbackOpen ? "Hide regenerate feedback" : "Open regenerate feedback"}
+                    tooltip={feedbackOpen ? "Hide feedback input" : "Regenerate with feedback"}
                     iconOnly
                   >
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -908,74 +919,66 @@ export default function OutputPanel({
                       <path d="M3 22v-6h6" />
                       <path d="M3.51 9a9 9 0 0 1 14.13-3.36L21 8" />
                       <path d="M20.49 15a9 9 0 0 1-14.13 3.36L3 16" />
+                      <path d="M8 12h8" />
                     </svg>
                   </Button>
-                  <Button
-                    className="output-stream-copy"
-                    variant={copied ? "solid" : "bordered"}
-                    color={copied ? "primary" : "default"}
-                    size="sm"
-                    onPress={onCopy}
-                    isDisabled={!outputText?.trim()}
-                    aria-label={copied ? "Output copied" : "Copy output"}
-                    tooltip={copied ? "Copied" : "Copy output text"}
-                    iconOnly
-                  >
-                    {copied ? (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    ) : (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <rect x="9" y="9" width="13" height="13" rx="2" />
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                      </svg>
-                    )}
-                  </Button>
-                  </div>
                 </div>
-                <div className="output-regen-zone" ref={outputZoneRef}>
-                  <div
-                    className={`output-stream-box output-markdown-view${isStreaming ? " is-streaming" : ""}${streamPulse ? " output-stream-box--pulse" : ""}`}
-                    aria-label="LLM output"
-                    role="region"
-                  >
-                    {outputText?.trim() ? (
-                      isStreaming ? (
-                        <>
-                          <div className="output-markdown-content" dangerouslySetInnerHTML={{ __html: streamingHtml }} />
-                          <span className="output-stream-caret" aria-hidden="true" />
-                        </>
-                      ) : (
-                        <OutputDisplayEditor
-                          outputText={outputText}
-                          cliches={cliches}
-                          lockedHighlight={lockedHighlight}
-                          rawHighlight={partialHighlight}
-                          isPartialStreaming={isPartialStreaming}
-                          onSelectionReady={setTooltip}
-                          onSelectionClear={() => setTooltip(null)}
-                          onClearCompletedHighlight={onClearPartialHighlight}
-                          containerRef={outputZoneRef}
-                        />
-                      )
-                    ) : (
-                      <p className="output-markdown-placeholder">
-                        {isStreaming ? "Waiting for model output..." : "Generated response"}
-                      </p>
-                    )}
-                  </div>
-                  <SelectionRegenTooltip
-                    tooltip={tooltip}
-                    isLoading={isPartialStreaming}
-                    onRegenerate={handlePartialRegen}
-                    onDismiss={() => setTooltip(null)}
-                    containerRef={outputZoneRef}
-                  />
-                </div>
-              </div>
-              <div className="editor-meta-outside" aria-hidden="true">
-                <span className="text-mono editor-meta-outside-item">{outputWords} words</span>
+                <Button
+                  className="output-stream-copy"
+                  variant={compareOpen ? "solid" : "bordered"}
+                  color={compareOpen ? "primary" : "default"}
+                  size="sm"
+                  onPress={() => setCompareOpen((prev) => !prev)}
+                  isDisabled={!originalText?.trim() && !outputText?.trim()}
+                  aria-label={compareOpen ? "Close side by side comparison" : "Open side by side comparison"}
+                  tooltip={compareOpen ? "Close compare view" : "Compare user vs LLM"}
+                  iconOnly
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="8" height="16" rx="1.5" />
+                    <rect x="13" y="4" width="8" height="16" rx="1.5" />
+                  </svg>
+                </Button>
+                <Button
+                  className="output-stream-copy"
+                  variant="bordered"
+                  color="default"
+                  size="sm"
+                  onPress={onRegenerate}
+                  isDisabled={isStreaming || !originalText?.trim()}
+                  aria-label="Regenerate output"
+                  tooltip="Regenerate output"
+                  iconOnly
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21 2v6h-6" />
+                    <path d="M3 22v-6h6" />
+                    <path d="M3.51 9a9 9 0 0 1 14.13-3.36L21 8" />
+                    <path d="M20.49 15a9 9 0 0 1-14.13 3.36L3 16" />
+                  </svg>
+                </Button>
+                <Button
+                  className="output-stream-copy"
+                  variant={copied ? "solid" : "bordered"}
+                  color={copied ? "primary" : "default"}
+                  size="sm"
+                  onPress={onCopy}
+                  isDisabled={!outputText?.trim()}
+                  aria-label={copied ? "Output copied" : "Copy output"}
+                  tooltip={copied ? "Copied" : "Copy output text"}
+                  iconOnly
+                >
+                  {copied ? (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="9" y="9" width="13" height="13" rx="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  )}
+                </Button>
               </div>
             </div>
           </div>

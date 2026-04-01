@@ -1968,6 +1968,10 @@ button {
 }
 
 .output-stream-box-wrap--compare {
+  --compare-toolbar-width: 40px;
+  --compare-toolbar-gap: 8px;
+  --compare-toolbar-offset: 14px;
+  --compare-toolbar-footprint: calc(var(--compare-toolbar-width) + var(--compare-toolbar-gap) + var(--compare-toolbar-offset));
   --compare-pane-height: clamp(280px, 52vh, 620px);
   width: min(96%, 1240px);
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -2012,6 +2016,11 @@ button {
 .output-source-shell {
   height: 100%;
   min-height: 0;
+}
+
+.output-stream-box-wrap--compare .output-source-shell {
+  padding-right: var(--compare-toolbar-footprint);
+  box-sizing: border-box;
 }
 
 .output-source-head {
@@ -2076,10 +2085,26 @@ button {
   gap: 8px;
 }
 
+.output-llm-panel {
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  flex-wrap: nowrap;
+  column-gap: 10px;
+  align-items: stretch;
+}
+
 .output-stream-box-wrap--compare .output-llm-column {
   height: 100%;
   min-height: 0;
   grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.output-stream-box-wrap--compare .output-llm-panel {
+  padding-right: var(--compare-toolbar-offset);
+  column-gap: var(--compare-toolbar-gap);
+  box-sizing: border-box;
 }
 
 .output-stream-box-wrap--compare .output-stream-box-shell {
@@ -2137,6 +2162,21 @@ button {
   gap: 8px;
 }
 
+.output-stream-actions--sidebar {
+  flex: 0 0 auto;
+  width: 40px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.output-stream-actions--sidebar > * {
+  display: flex;
+  justify-content: center;
+}
+
 .output-feedback-trigger {
   position: relative;
   z-index: 5;
@@ -2175,6 +2215,10 @@ button {
 
 .output-stream-copy {
   margin: 0;
+}
+
+.output-stream-actions--sidebar .output-stream-copy {
+  min-width: 40px;
 }
 
 /* ── Selection Regenerate Tooltip ─────────────────────────────────── */
@@ -2838,7 +2882,7 @@ button {
   box-shadow: none;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 640px) {
   .output-stream-box-wrap {
     width: 100%;
     min-width: 0;
@@ -2857,6 +2901,11 @@ button {
     min-height: 0;
   }
 
+  .output-llm-panel {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
   .output-stream-box-tools {
     flex-wrap: wrap;
     align-items: flex-start;
@@ -2864,6 +2913,15 @@ button {
 
   .output-stream-actions {
     margin-left: auto;
+  }
+
+  .output-stream-actions--sidebar {
+    width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0;
   }
 
   .output-stream-box {
