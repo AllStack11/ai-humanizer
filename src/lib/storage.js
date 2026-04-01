@@ -292,17 +292,18 @@ export async function clearStoredApiKey(runtime) {
 
 export async function resetAppData(runtime) {
   try {
-    const scope = await getStorageScope();
     const allKeys = Object.keys(localStorage);
-    const scopedPrefix = `${STORAGE_PREFIX}:${scope}:`;
     for (const key of allKeys) {
-      if (key.startsWith(`${STORAGE_PREFIX}:`) || key.startsWith(scopedPrefix)) {
+      if (key.startsWith(`${STORAGE_PREFIX}:`)) {
         localStorage.removeItem(key);
       }
     }
     for (const key of LEGACY_KEYS) {
       localStorage.removeItem(key);
     }
+    localStorage.removeItem(WEB_API_KEY_STORAGE_KEY);
+    localStorage.removeItem(WEB_RUNTIME_CONFIG_KEY);
+    localStorage.removeItem(WEB_REQUEST_LOGS_KEY);
   } catch {}
 
   if (!isTauriRuntime()) return { ok: true };

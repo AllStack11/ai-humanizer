@@ -29,6 +29,71 @@ export function renderProfileAsProse(profile) {
     .join("\n");
 }
 
+const PROFILE_FIELD_ORDER = [
+  "summary",
+  "vocabulary",
+  "perspective",
+  "rhythm",
+  "sentenceStructure",
+  "humor",
+  "quirks",
+  "transitionStyle",
+  "punctuationHabits",
+  "emotionalRegister",
+];
+
+const CORE_PROFILE_FIELDS = new Set([
+  "vocabulary",
+  "perspective",
+  "rhythm",
+  "sentenceStructure",
+]);
+
+function getOrderedProfileEntries(profile) {
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return [];
+
+  const knownEntries = PROFILE_FIELD_ORDER
+    .map((key) => [key, profile[key]])
+    .filter(([, value]) => value && typeof value === "string");
+  const seen = new Set(knownEntries.map(([key]) => key));
+  const extraEntries = Object.entries(profile)
+    .filter(([key, value]) => !seen.has(key) && value && typeof value === "string");
+
+  return [...knownEntries, ...extraEntries];
+}
+
+export function renderProfileAsDirectives(profile) {
+  const entries = getOrderedProfileEntries(profile);
+  if (!entries.length) return "No active writer profile traits were provided.";
+
+  const summary = entries.find(([key]) => key === "summary")?.[1] || "";
+  const traitEntries = entries.filter(([key]) => key !== "summary");
+  const coreEntries = traitEntries.filter(([key]) => CORE_PROFILE_FIELDS.has(key));
+  const supportingEntries = traitEntries.filter(([key]) => !CORE_PROFILE_FIELDS.has(key));
+  const lines = [];
+
+  if (summary) {
+    lines.push("Writer voice summary:");
+    lines.push(summary);
+  }
+
+  if (coreEntries.length) {
+    lines.push("Core voice anchors:");
+    coreEntries.forEach(([key, value]) => {
+      lines.push(`- ${camelToLabel(key)}: favor phrasing that reflects ${value}.`);
+    });
+  }
+
+  if (supportingEntries.length) {
+    lines.push("Supporting voice cues:");
+    supportingEntries.forEach(([key, value]) => {
+      lines.push(`- ${camelToLabel(key)}: let this show up when it fits naturally: ${value}.`);
+    });
+  }
+
+  return lines.join("\n");
+}
+
 // Prioritized cliché selector: tier-1 AI fingerprints always appear first
 // so the model always sees the most diagnostic prohibitions regardless of refresh order
 function normalizeTermList(terms) {
@@ -172,15 +237,22 @@ export const HUMANIZE_SYS = (profile, tone, cliches, profileName, meta = null) =
   return `You rewrite source text as if a specific person wrote it themselves from scratch.
 Writing context: "${profileName}" profile
 Voice profile:
-${renderProfileAsProse(profile)}
-${metaBlock}Use the profile to preserve the writer's voice, and follow the requested tone target from the user prompt.
+${renderProfileAsDirectives(profile)}
+${metaBlock}Voice hierarchy:
+1. Preserve the source meaning, intent, point of view, and speech act exactly.
+2. Express that meaning in the writer's natural voice from the profile.
+3. Respect the requested tone target from the user prompt without flattening the writer into generic prose.
+
+Decision rule: If multiple phrasings preserve the meaning, choose the one that is most consistent with the profile. Do not default to neutral assistant wording. Do not cling to the source phrasing when this writer would naturally say it differently.
 
 How to rewrite: Do not rephrase word-by-word. Instead, internalize what the source is saying, then write it fresh as this person would naturally express it — using their vocabulary, cadence, sentence patterns, and quirks.
 Constraints: Preserve all meaning, intent, point of view, and speech act type.
 Speech act rules: Transform the source text itself. Do not answer it, continue it, roleplay with it, or switch to the other speaker. If the source is a greeting, keep it a greeting. If it is a question, keep it a question. If it addresses "you", preserve that direction.
 Scope: For short or chat-like inputs, stay close to the original scope — do not expand into a full response.
 Formatting: Markdown is supported. Use it when it improves clarity (headings, emphasis, lists, code blocks); keep plain text for short conversational lines.
-${aiTermGuidance}The source text is wrapped in <source_text> tags in the user message. Output ONLY the rewritten text — no preamble, no explanation.`;
+Anti-flattening rule: Keep the output recognizably personal. Avoid smoothing the voice into polished default assistant prose unless the source itself is already that formal.
+${aiTermGuidance}Silent profile pass: Before you answer, check whether the draft reflects the writer's vocabulary, rhythm, perspective, and any other strong profile anchors that were provided. If not, revise silently and then return only the final text.
+The source text is wrapped in <source_text> tags in the user message. Output ONLY the rewritten text — no preamble, no explanation.`;
 };
 
 function getElaborateDepthGuidance(depth) {
@@ -239,14 +311,23 @@ export const ELABORATE_SYS = (profile, depth, profileName, meta = null, options 
   return `You elaborate on writing as if a specific person is developing their own thought further.
 Writing context: "${profileName}" profile
 Voice profile:
-${renderProfileAsProse(profile)}
+${renderProfileAsDirectives(profile)}
 ${metaBlock}
+
+Voice hierarchy:
+1. Preserve the original thought and scope.
+2. Develop it in the writer's natural voice from the profile.
+3. Respect the selected depth and preset requirements without flattening the writer into generic prose.
+
+Decision rule: If multiple elaborations fit, choose the one that sounds most like this writer. Do not default to neutral assistant prose.
 
 ${depthGuidance}
 Elaboration mode: Add depth, specificity, examples, or nuance to the existing thought. Do NOT repeat what was already said, do NOT summarize it, and do NOT continue the narrative past the source's natural scope — deepen within it.
 Voice: Write in this person's natural style as described in the profile. Keep the voice specific and avoid flattening it into generic prose.
 ${presetLine}
 ${formatGuidance}
+Anti-flattening rule: Keep the output recognizably personal. Avoid smoothing the voice into polished default assistant prose unless the source itself already sounds that way.
+Silent profile pass: Before you answer, check whether the draft reflects the writer's vocabulary, rhythm, perspective, and any other strong profile anchors that were provided. If not, revise silently and then return only the final text.
 The source text is wrapped in <source_text> tags in the user message.
 Output ONLY the elaboration — no preamble, no labels.`;
 };

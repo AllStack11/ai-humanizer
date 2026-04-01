@@ -1,7 +1,10 @@
+import { useState } from "react";
 import { Modal } from "@mantine/core";
 import { Button } from "./AppUI.jsx";
 
 export default function ResetConfirmModal({ onClose, onConfirm }) {
+  const [confirmStepOpen, setConfirmStepOpen] = useState(false);
+
   return (
     <Modal
       opened
@@ -14,7 +17,7 @@ export default function ResetConfirmModal({ onClose, onConfirm }) {
       zIndex={500}
     >
       <div className="toolbar-row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>Reset App Data</h2>
+        <h2 style={{ margin: 0 }}>Reset To Factory Settings</h2>
         <Button
           variant="light"
           onPress={onClose}
@@ -30,25 +33,52 @@ export default function ResetConfirmModal({ onClose, onConfirm }) {
       </div>
 
       <p style={{ marginTop: 0, marginBottom: 8, fontSize: 13 }}>
-        This will permanently erase all local app data. <strong>This cannot be undone.</strong>
+        This will permanently erase all app-managed local data and return the app to first-launch state. <strong>This cannot be undone.</strong>
       </p>
 
       <ul style={{ margin: "0 0 16px 0", paddingLeft: 18, fontSize: 13, lineHeight: 1.7 }}>
         <li>All writing profiles (custom profiles deleted, built-in profiles reset)</li>
         <li>Output history and session data</li>
-        <li>Saved preferences</li>
-        <li>API key (stored on disk)</li>
-        <li>Style backups</li>
+        <li>Saved preferences, model choices, and runtime API settings</li>
+        <li>Stored API keys and local provider configuration</li>
+        <li>AI terms, hidden terms, and punctuation bans</li>
+        <li>Style backups and imported custom models</li>
         <li>Debug logs and request history</li>
       </ul>
 
+      <p style={{ marginTop: 0, marginBottom: 16, fontSize: 12, color: "#655d52" }}>
+        Environment-provided API keys are outside the app and cannot be cleared here.
+      </p>
+
+      {confirmStepOpen && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: 12,
+            borderRadius: 10,
+            background: "#fef2f2",
+            border: "1px solid #fecaca",
+            fontSize: 13,
+            color: "#991b1b",
+          }}
+        >
+          Are you sure? This will immediately wipe your local profiles, settings, logs, and stored API credentials.
+        </div>
+      )}
+
       <div className="toolbar-row" style={{ justifyContent: "space-between" }}>
-        <Button variant="bordered" onPress={onClose} aria-label="Cancel reset">
+        <Button variant="bordered" onPress={onClose} aria-label="Cancel factory reset">
           Cancel
         </Button>
-        <Button color="danger" variant="solid" onPress={onConfirm} aria-label="Confirm full reset">
-          Reset Everything
-        </Button>
+        {confirmStepOpen ? (
+          <Button color="danger" variant="solid" onPress={onConfirm} aria-label="Confirm final factory reset">
+            Yes, Reset Everything
+          </Button>
+        ) : (
+          <Button color="danger" variant="solid" onPress={() => setConfirmStepOpen(true)} aria-label="Continue factory reset">
+            Continue
+          </Button>
+        )}
       </div>
     </Modal>
   );

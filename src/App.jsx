@@ -946,16 +946,28 @@ export default function App() {
     setLoading(true);
     setError("");
     try {
+      activeGenerationIdRef.current += 1;
+      activeGenerationControllerRef.current?.abort();
+      activeGenerationControllerRef.current = null;
       await resetAppData(runtimeConfig);
+      const apiKeyStatus = await getApiKeyStatus({ apiUrl: "", apiKeyFile: "" }).catch(() => ({ hasKey: false, source: "missing" }));
 
       setStyles({});
       setActiveProfileId(PROFILE_OPTIONS[0].id);
+      setAddProfileModalOpen(false);
+      setProfileModalOpen(false);
+      setNewProfileName("");
       setAiTerms(normalizeStoredAiTerms(null));
       setClicheFetching(false);
       setMode("humanize");
       setInputText("");
+      inputTextRef.current = "";
       clearOutputState();
+      setIsPartialStreaming(false);
+      setPartialRegenText("");
+      clearMergeProgress();
       setToneLevel(2);
+      setElaborateToneLevel(2);
       setStripCliches(true);
       setElabDepth(2);
       setOneOffInstruction("");
@@ -965,24 +977,35 @@ export default function App() {
       setSelectedModel(MODEL_OPTIONS[0].value);
       setFeatureModel(MODEL_OPTIONS[0].value);
       setAiTerms(normalizeStoredAiTerms(null));
+      setAddModelModalOpen(false);
+      setResetConfirmOpen(false);
       setLogsOpen(false);
       setRequestLogs([]);
       setLogsLoading(false);
       setManagementOpen(false);
+      setMergeProgressOpen(false);
+      setMergeProgressTitle("Updating profile");
+      setLoading(false);
+      setRequestLoading(false);
+      setInputUsage(null);
+      setStatus("App reset to factory settings.");
+      setError("");
+      setOutputUsage(null);
+      setOutputLikelyHitTokenLimit(false);
       setStyleModalOpen(true);
       setBackupStatus("idle");
       setBackupLastSavedAt(null);
       setBackupError("");
       resetProcessLog();
-      setStatus("All app data reset.");
       setApiKeyInput("");
       setApiUrlInput("");
       setApiKeyFileInput("");
       setRuntimeConfig({ apiUrl: "", apiKeyFile: "" });
-      setApiKeyRequired(true);
-      setApiKeyModalOpen(true);
+      setApiKeySource(apiKeyStatus?.source || "missing");
+      setApiKeyRequired(!apiKeyStatus?.hasKey);
+      setApiKeyModalOpen(!apiKeyStatus?.hasKey);
     } catch (e) {
-      setError("Full reset failed: " + getErrorMessage(e));
+      setError("Factory reset failed: " + getErrorMessage(e));
     } finally {
       setLoading(false);
     }

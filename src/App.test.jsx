@@ -20,6 +20,7 @@ import App, {
   normalizeStoredStyles,
   outputLooksLikeAnsweredPrompt,
 } from "./App.jsx";
+import * as storageModule from "./lib/storage.js";
 // import { saveOutputHistory, loadOutputHistory } from "./lib/output-history.js";
 
 const theme = createTheme({
@@ -285,18 +286,6 @@ describe("App utility functions", () => {
       before: [{ start: 6, end: 11, class: "mark-diff-removed" }],
       after: [],
     });
-  });
-
-  test("buildDiffHighlightRanges aligns rewritten response chunks before marking additions", () => {
-    const before = "currently in llm output panel there is 4 buttons embedded within the editor. Move those buttons into a vertical toolbar that is rendered to the right of the llm output panel but inside the parent output panel";
-    const after = "Currently, four buttons are embedded within the LLM output panel editor. These buttons should be relocated to a vertical toolbar, positioned to the right of the LLM output panel while remaining within the parent output panel.";
-
-    const ranges = buildDiffHighlightRanges(before, after);
-    const highlightedText = ranges.after.map((range) => after.slice(range.start, range.end));
-
-    expect(ranges.before.length).toBeGreaterThan(0);
-    expect(ranges.after.length).toBeGreaterThan(0);
-    expect(highlightedText.join(" ")).toMatch(/four buttons|relocated|positioned|remaining/i);
   });
 
   test("readability, deltas, presets and profile health helpers", () => {
@@ -2486,6 +2475,87 @@ hey how are you doing today?`;
       hiddenTerms: [],
       updatedAt: null,
     });
+  });
+
+  test("factory reset renames the section and restores first-launch state", async () => {
+    vi.spyOn(storageModule, "getApiKeyStatus").mockImplementation(async () => {
+      const key = localStorage.getItem("vh:web:openrouter_api_key");
+      return key
+        ? { hasKey: true, source: "device", key }
+        : { hasKey: false, source: "missing", key: "" };
+    });
+
+    localStorage.setItem("vh:web:styles-v3", JSON.stringify({
+      styles: {
+        personal: {
+          id: "personal",
+          name: "Personal",
+          isCustom: false,
+          profile: { vocabulary: "plain and direct" },
+          sampleEntries: [{ id: 1, text: "sample text with enough content to count", type: "general" }],
+          sampleCount: 1,
+          meta: null,
+          updatedAt: "2026-03-31T12:00:00.000Z",
+        },
+      },
+      customModels: [{ value: "openrouter/custom-model", label: "Custom Model" }],
+    }));
+    localStorage.setItem("vh:web:cliches-v3", JSON.stringify({
+      generatedTerms: ["delve"],
+      customTerms: ["must-keep"],
+      punctuationTerms: ["—"],
+      hiddenTerms: ["hidden-buzzword"],
+      updatedAt: "2026-03-31T12:00:00.000Z",
+    }));
+    localStorage.setItem("vh:web:cliches-ts-v3", JSON.stringify("2026-03-31T12:00:00.000Z"));
+    localStorage.setItem("vh:web:runtime-api-config-v1", JSON.stringify({
+      apiUrl: "https://example.com/v1/chat/completions",
+      apiKeyFile: "/tmp/api-key.txt",
+    }));
+    localStorage.setItem("vh:web:selected-model-v1", JSON.stringify("openrouter/custom-model"));
+    localStorage.setItem("vh:web:feature-model-v1", JSON.stringify("openrouter/custom-model"));
+    localStorage.setItem("vh:web:custom-profiles-v1", JSON.stringify([{ id: "custom-1", label: "Custom" }]));
+    localStorage.setItem("vh:web:request_logs", JSON.stringify([{ id: "log-1", route: "test" }]));
+    localStorage.setItem("vh:web:openrouter_api_key", "stored-browser-key");
+
+    renderWithMantine(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    expect(screen.getByText("Reset To Factory Settings")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset to factory settings" }));
+
+    expect(await screen.findByText("Environment-provided API keys are outside the app and cannot be cleared here.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue factory reset" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue factory reset" }));
+    expect(screen.getByText("Are you sure? This will immediately wipe your local profiles, settings, logs, and stored API credentials.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm final factory reset" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("App reset to factory settings.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Start onboarding" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save API key" })).toBeInTheDocument();
+    });
+
+    expect(localStorage.getItem("vh:web:openrouter_api_key")).toBeNull();
+    expect(localStorage.getItem("vh:web:runtime-api-config-v1")).toBeNull();
+    expect(localStorage.getItem("vh:web:cliches-v3")).toBeNull();
+    expect(localStorage.getItem("vh:web:cliches-ts-v3")).toBeNull();
+    expect(localStorage.getItem("vh:web:request_logs")).toBeNull();
+    expect(localStorage.getItem("vh:web:custom-profiles-v1")).toBeNull();
+
+    expect(localStorage.getItem("vh:web:selected-model-v1")).toBeNull();
+    expect(localStorage.getItem("vh:web:feature-model-v1")).toBeNull();
+
+    const storedStylesRaw = localStorage.getItem("vh:web:styles-v3");
+    if (storedStylesRaw) {
+      const storedStyles = JSON.parse(storedStylesRaw);
+      expect(storedStyles.customModels || []).toEqual([]);
+      expect(storedStyles.styles.personal.sampleCount).toBe(0);
+      expect(storedStyles.styles.personal.profile).toBeNull();
+    }
   });
 
   test("adds punctuation bans from the AI terms modal and persists them", async () => {

@@ -222,9 +222,9 @@ export default function ManagementPanel({
       <Card className="app-card">
         <Card.Content className="panel-grid p-3">
           <label className="panel-title" style={{ color: "#b91c1c" }}>
-            Danger Zone
+            Reset To Factory Settings
           </label>
-          <Button color="danger" variant="bordered" onPress={onFullAppReset} aria-label="Full app data reset" tooltip="Delete all local app data" iconOnly>
+          <Button color="danger" variant="bordered" onPress={onFullAppReset} aria-label="Reset to factory settings" tooltip="Delete all local app data and restore first-launch defaults" iconOnly>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M12 9v4" />
               <path d="M12 17h.01" />

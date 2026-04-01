@@ -165,10 +165,12 @@ describe("selectCliches", () => {
 describe("HUMANIZE_SYS", () => {
   const profile = { humor: "dry and direct", vocabulary: "plain Anglo-Saxon" };
 
-  test("renders profile as prose bullets, not JSON", () => {
+  test("renders profile as directive-style voice guidance, not JSON", () => {
     const prompt = HUMANIZE_SYS(profile, 2, []);
-    expect(prompt).toContain("- Humor: dry and direct");
-    expect(prompt).toContain("- Vocabulary: plain Anglo-Saxon");
+    expect(prompt).toContain("Core voice anchors:");
+    expect(prompt).toContain("- Vocabulary: favor phrasing that reflects plain Anglo-Saxon.");
+    expect(prompt).toContain("Supporting voice cues:");
+    expect(prompt).toContain("- Humor: let this show up when it fits naturally: dry and direct.");
     expect(prompt).not.toContain('{"tone"');
   });
 
@@ -205,6 +207,13 @@ describe("HUMANIZE_SYS", () => {
   test("markdown instruction is present", () => {
     const prompt = HUMANIZE_SYS(profile, 2, []);
     expect(prompt).toMatch(/Markdown is supported/i);
+  });
+
+  test("includes voice hierarchy and anti-flattening rules", () => {
+    const prompt = HUMANIZE_SYS(profile, 2, []);
+    expect(prompt).toMatch(/Voice hierarchy:/i);
+    expect(prompt).toMatch(/Do not default to neutral assistant wording/i);
+    expect(prompt).toMatch(/Anti-flattening rule:/i);
   });
 
   test("speech act rules are present", () => {
@@ -248,7 +257,9 @@ describe("ELABORATE_SYS", () => {
 
   test("renders profile as prose bullets", () => {
     const prompt = ELABORATE_SYS(profile, 2);
-    expect(prompt).toContain("- Vocabulary: analytical");
+    expect(prompt).toContain("Core voice anchors:");
+    expect(prompt).toContain("- Vocabulary: favor phrasing that reflects analytical.");
+    expect(prompt).toContain("- Rhythm: favor phrasing that reflects even measured cadence.");
     expect(prompt).not.toContain('{"tone"');
   });
 
@@ -275,6 +286,14 @@ describe("ELABORATE_SYS", () => {
     const prompt = ELABORATE_SYS(profile, 2);
     expect(prompt).not.toContain('Tone target: "Formal"');
     expect(prompt).not.toContain('Tone target: "Balanced"');
+  });
+
+  test("includes voice hierarchy and anti-flattening rules", () => {
+    const prompt = ELABORATE_SYS(profile, 2);
+    expect(prompt).toMatch(/Voice hierarchy:/i);
+    expect(prompt).toMatch(/Do not default to neutral assistant prose/i);
+    expect(prompt).toMatch(/Anti-flattening rule:/i);
+    expect(prompt).toMatch(/Silent profile pass:/i);
   });
 
   test("includes plain-text formatting guidance by default", () => {
