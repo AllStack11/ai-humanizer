@@ -26,24 +26,6 @@ const OUTPUT_EDITOR_KEYS_EXTENSION = Extension.create({
   },
 });
 
-function escapeHtml(text) {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function buildEditorHtml(text) {
-  if (!text) return "";
-
-  return text
-    .split(/\n{2,}/)
-    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
-    .join("");
-}
-
 function getEditorText(editor) {
   return editor.getText({ blockSeparator: EDITOR_BLOCK_SEPARATOR });
 }
@@ -279,78 +261,6 @@ function SelectionRegenTooltip({ tooltip, isLoading, onRegenerate, onDismiss, co
       )}
     </div>
   );
-}
-
-function OutputEditor({ value, onChange, isEditable = true, placeholder = "Refine the rewrite before accepting it…", cliches = [] }) {
-  const editor = useEditor({
-    immediatelyRender: true,
-    shouldRerenderOnTransaction: false,
-    editable: isEditable,
-    extensions: [
-      StarterKit.configure({
-        heading: false,
-        bulletList: false,
-        orderedList: false,
-        listItem: false,
-        blockquote: false,
-        codeBlock: false,
-        horizontalRule: false,
-      }),
-      Placeholder.configure({
-        placeholder,
-      }),
-      OUTPUT_EDITOR_KEYS_EXTENSION,
-      DynamicHighlighter.configure({
-        getRanges: (text) => {
-          if (!text) return [];
-          return buildClicheRanges(text, cliches).map((range) => ({
-            start: range.start,
-            end: range.end,
-            kind: "cliche",
-          }));
-        },
-      }),
-    ],
-    content: buildEditorHtml(value),
-    onUpdate: ({ editor }) => {
-      const text = getEditorText(editor);
-      if (text !== value) onChange(text);
-    },
-    editorProps: {
-      attributes: {
-        class: "output-editor tiptap-output-editor",
-        "aria-label": "Generated output editor",
-      },
-    },
-  });
-
-  useEffect(() => {
-    if (!editor) return;
-    editor.setEditable(isEditable);
-  }, [editor, isEditable]);
-
-  useEffect(() => {
-    if (!editor) return;
-
-    const editorText = getEditorText(editor);
-    if (editorText !== value) {
-      const { from, to } = editor.state.selection;
-      editor.commands.setContent(buildEditorHtml(value), false);
-      try {
-        editor.commands.setTextSelection({
-          from: Math.min(from, editor.state.doc.content.size),
-          to: Math.min(to, editor.state.doc.content.size),
-        });
-      } catch {}
-    }
-  }, [editor, value]);
-
-  useEffect(() => {
-    if (!editor) return;
-    editor.view.dispatch(editor.state.tr.setMeta("dynamicHighlighterUpdate", true));
-  }, [editor, value, cliches]);
-
-  return <EditorContent editor={editor} className="output-editor-content" />;
 }
 
 const READABILITY_TOOLTIP = (
@@ -688,6 +598,7 @@ export default function OutputPanel({
   outputWords,
   inputUsage,
   outputUsage,
+  outputLikelyHitTokenLimit = false,
   isStreaming,
   onOutputChange,
   showDiff,
@@ -889,6 +800,11 @@ export default function OutputPanel({
                 <div className="output-stream-box-tools">
                   <div className="output-stream-labels">
                     <span className="text-mono output-role-label">LLM output</span>
+                    {outputLikelyHitTokenLimit ? (
+                      <span className="text-mono output-token-cap-badge" role="status" aria-label="Response may be truncated by token limit">
+                        Near token limit
+                      </span>
+                    ) : null}
                   </div>
                   <div className="output-stream-actions">
                   <div className="output-feedback-trigger">
@@ -1086,12 +1002,6 @@ export default function OutputPanel({
             processSteps={processSteps}
             onCancel={onCancelGeneration}
           />
-        ) : null}
-
-        {!isStreaming ? (
-          <div className="output-editor-stealth">
-              <OutputEditor value={outputText} onChange={onOutputChange} cliches={cliches} />
-          </div>
         ) : null}
 
       </Card.Content>

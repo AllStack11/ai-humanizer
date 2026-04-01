@@ -13,11 +13,15 @@ export default function ManagementPanel({
   clichesUpdatedAt,
   generatedTerms,
   customTerms,
+  punctuationTerms,
   hiddenTermsCount = 0,
   onRefreshCliches,
   onAddCustomTerm,
+  onAddPunctuationTerm,
   onRemoveCustomTerm,
+  onRemovePunctuationTerm,
   onHideGeneratedTerm,
+  onClearAllAiTerms,
   clicheFetching,
   hasProfile,
   isCustomProfile,
@@ -31,12 +35,16 @@ export default function ManagementPanel({
   const importInputRef = useRef(null);
   const [clicheListOpen, setClicheListOpen] = useState(false);
   const [newTerm, setNewTerm] = useState("");
-  const totalTerms = generatedTerms.length + customTerms.length;
+  const [newPunctuationTerm, setNewPunctuationTerm] = useState("");
+  const totalTerms = generatedTerms.length + customTerms.length + punctuationTerms.length;
   const refreshLabel = clichesUpdatedAt
     ? `Last refreshed ${clichesUpdatedAt.toLocaleString()}`
     : "Not refreshed yet";
   const normalizedNewTerm = newTerm.trim().toLowerCase();
-  const termExists = generatedTerms.includes(normalizedNewTerm) || customTerms.includes(normalizedNewTerm);
+  const normalizedNewPunctuationTerm = newPunctuationTerm.trim().toLowerCase();
+  const termExists = generatedTerms.includes(normalizedNewTerm) || customTerms.includes(normalizedNewTerm) || punctuationTerms.includes(normalizedNewTerm);
+  const punctuationTermExists = generatedTerms.includes(normalizedNewPunctuationTerm) || customTerms.includes(normalizedNewPunctuationTerm) || punctuationTerms.includes(normalizedNewPunctuationTerm);
+  const hasAnyTerms = totalTerms > 0 || hiddenTermsCount > 0;
 
   const handleAddTerm = () => {
     if (!normalizedNewTerm || termExists) {
@@ -45,6 +53,15 @@ export default function ManagementPanel({
     }
     onAddCustomTerm(normalizedNewTerm);
     setNewTerm("");
+  };
+
+  const handleAddPunctuationTerm = () => {
+    if (!normalizedNewPunctuationTerm || punctuationTermExists) {
+      setNewPunctuationTerm("");
+      return;
+    }
+    onAddPunctuationTerm(normalizedNewPunctuationTerm);
+    setNewPunctuationTerm("");
   };
 
   return (
@@ -82,9 +99,27 @@ export default function ManagementPanel({
 
       <Card className="app-card">
         <Card.Content className="panel-grid p-3">
-          <label className="panel-title">
-            AI Terms
-          </label>
+          <div className="toolbar-row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+            <label className="panel-title">
+              AI Terms
+            </label>
+            <Button
+              color="danger"
+              variant="subtle"
+              size="xs"
+              onPress={onClearAllAiTerms}
+              isDisabled={!hasAnyTerms}
+              aria-label="Clear all AI terms"
+              tooltip="Clear all AI terms"
+              iconOnly
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M3 6h18" />
+                <path d="M8 6V4h8v2" />
+                <path d="m19 6-1 14H6L5 6" />
+              </svg>
+            </Button>
+          </div>
           <Text className="text-mono" size="xs">
             {clicheFetching ? "Refreshing AI terms..." : `${totalTerms} active terms`}
           </Text>
@@ -200,7 +235,7 @@ export default function ManagementPanel({
       </Card>
       <Modal
         opened={clicheListOpen}
-        onClose={() => { setClicheListOpen(false); setNewTerm(""); }}
+        onClose={() => { setClicheListOpen(false); setNewTerm(""); setNewPunctuationTerm(""); }}
         title={<strong>AI Terms ({totalTerms})</strong>}
         zIndex={500}
         scrollAreaComponent="div"
@@ -268,6 +303,84 @@ export default function ManagementPanel({
               <button
                 aria-label="Add term"
                 onClick={handleAddTerm}
+                style={{
+                  background: "none",
+                  border: "1px solid var(--app-border, rgba(255,255,255,0.15))",
+                  borderRadius: 4,
+                  padding: "4px 8px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <path d="M12 5v14" /><path d="M5 12h14" />
+                </svg>
+              </button>
+            </div>
+          </section>
+
+          <section className="panel-grid" style={{ gap: 8 }}>
+            <Text size="xs" className="text-mono">Punctuation bans ({punctuationTerms.length})</Text>
+            {punctuationTerms.length ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                {punctuationTerms.map((term) => (
+                  <span
+                    key={`punctuation-${term}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "2px 6px 2px 8px",
+                      borderRadius: 4,
+                      border: "1px solid var(--app-border, rgba(255,255,255,0.12))",
+                      background: "var(--app-surface, rgba(255,255,255,0.04))",
+                    }}
+                  >
+                    <Text size="xs" className="text-mono">{term}</Text>
+                    <button
+                      aria-label={`Remove punctuation ban ${term}`}
+                      onClick={() => onRemovePunctuationTerm(term)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        opacity: 0.5,
+                        lineHeight: 1,
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
+                      onMouseLeave={(e) => (e.currentTarget.style.opacity = 0.5)}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                      </svg>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <Text size="xs" c="#8b7f70">Add punctuation patterns like em dashes or ellipses here to hard-ban them in prompts.</Text>
+            )}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <TextInput
+                placeholder="Add punctuation…"
+                value={newPunctuationTerm}
+                onChange={(e) => setNewPunctuationTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    handleAddPunctuationTerm();
+                  }
+                }}
+                size="xs"
+                style={{ flex: 1 }}
+                classNames={{ input: "text-mono" }}
+              />
+              <button
+                aria-label="Add punctuation"
+                onClick={handleAddPunctuationTerm}
                 style={{
                   background: "none",
                   border: "1px solid var(--app-border, rgba(255,255,255,0.15))",

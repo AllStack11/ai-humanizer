@@ -19,11 +19,16 @@ export function expandSelectionToWordBoundaries(text, start, end) {
 
   let nextStart = clampedStart;
   let nextEnd = clampedEnd;
+  const trailingEdgeIsInsideWord =
+    nextEnd > 0
+    && nextEnd < source.length
+    && isWordChar(source[nextEnd - 1])
+    && isWordChar(source[nextEnd]);
 
   while (nextStart > 0 && isWordChar(source[nextStart - 1])) {
     nextStart -= 1;
   }
-  while (nextEnd < source.length && isWordChar(source[nextEnd])) {
+  while (trailingEdgeIsInsideWord && nextEnd < source.length && isWordChar(source[nextEnd])) {
     nextEnd += 1;
   }
 

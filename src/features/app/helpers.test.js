@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { isPlainObject, normalizeProfileObject, parseJsonFromModelOutput } from "./helpers.js";
+import {
+  isPlainObject,
+  normalizeProfileObject,
+  parseJsonFromModelOutput,
+  parsePartialRegenPayload,
+  parseStructuredTextPayload,
+} from "./helpers.js";
 import { PROFILE_TRAIT_KEYS } from "../../constants/index.js";
 
 describe("parseJsonFromModelOutput", () => {
@@ -107,5 +113,37 @@ describe("profile object validation", () => {
     expect(normalized.tone).toBe("direct");
     expect(normalized.humor).toBe("");
     expect(normalized.rhythm).toBe("");
+  });
+});
+
+describe("parsePartialRegenPayload", () => {
+  it("extracts a replacement string from JSON output", () => {
+    expect(parsePartialRegenPayload('{"replacement":"Refined replacement."}')).toEqual({
+      replacement: "Refined replacement.",
+    });
+  });
+
+  it("rejects non-object payloads", () => {
+    expect(() => parsePartialRegenPayload('["bad"]')).toThrow("Model returned invalid partial regeneration payload.");
+  });
+
+  it("rejects missing replacement text", () => {
+    expect(() => parsePartialRegenPayload('{"replacement":"   "}')).toThrow("The model returned no usable replacement text.");
+  });
+});
+
+describe("parseStructuredTextPayload", () => {
+  it("extracts an output string from JSON output", () => {
+    expect(parseStructuredTextPayload('{"output":"Clean text."}')).toEqual({
+      output: "Clean text.",
+    });
+  });
+
+  it("rejects non-object payloads", () => {
+    expect(() => parseStructuredTextPayload('["bad"]')).toThrow("Model returned invalid generation payload.");
+  });
+
+  it("rejects missing output text", () => {
+    expect(() => parseStructuredTextPayload('{"output":"   "}')).toThrow("The model returned no usable replacement text.");
   });
 });

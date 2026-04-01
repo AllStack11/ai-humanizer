@@ -1,5 +1,6 @@
 import { TONE_LEVELS, ELAB_DEPTHS } from '../constants/tones.js';
 import { TIER1_CLICHES } from '../constants/cliches.js';
+import { OUTPUT_PRESET_OPTIONS } from "../constants/presets.js";
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -41,14 +42,15 @@ function normalizeTermList(terms) {
 
 function normalizeClicheInput(cliches) {
   if (Array.isArray(cliches)) {
-    return { generatedTerms: normalizeTermList(cliches), customTerms: [] };
+    return { generatedTerms: normalizeTermList(cliches), customTerms: [], punctuationTerms: [] };
   }
   if (!cliches || typeof cliches !== "object") {
-    return { generatedTerms: [], customTerms: [] };
+    return { generatedTerms: [], customTerms: [], punctuationTerms: [] };
   }
   return {
     generatedTerms: normalizeTermList(cliches.generatedTerms),
     customTerms: normalizeTermList(cliches.customTerms),
+    punctuationTerms: normalizeTermList(cliches.punctuationTerms),
   };
 }
 
@@ -62,14 +64,68 @@ function shuffleTerms(terms) {
 }
 
 export function selectCliches(cliches, budget = 40) {
-  const { generatedTerms, customTerms } = normalizeClicheInput(cliches);
+  const { generatedTerms, customTerms, punctuationTerms } = normalizeClicheInput(cliches);
   const customSet = new Set(customTerms);
+  const punctuationSet = new Set(punctuationTerms);
   const prioritized = [
+    ...shuffleTerms(punctuationTerms),
     ...shuffleTerms(generatedTerms.filter((c) => TIER1_CLICHES.has(c) && !customSet.has(c))),
     ...shuffleTerms(customTerms),
-    ...shuffleTerms(generatedTerms.filter((c) => !TIER1_CLICHES.has(c) && !customSet.has(c))),
+    ...shuffleTerms(generatedTerms.filter((c) => !TIER1_CLICHES.has(c) && !customSet.has(c) && !punctuationSet.has(c))),
   ];
   return prioritized.slice(0, budget);
+}
+
+function formatQuotedTermList(terms) {
+  return terms.map((term) => `"${term}"`).join(", ");
+}
+
+function splitPunctuationTerms(terms) {
+  const punctuationTerms = [];
+  const phraseTerms = [];
+
+  terms.forEach((term) => {
+    if (/^[^\p{L}\p{N}]+$/u.test(term)) {
+      punctuationTerms.push(term);
+      return;
+    }
+    phraseTerms.push(term);
+  });
+
+  return { punctuationTerms, phraseTerms };
+}
+
+export function buildAiTermGuidance(cliches, budget = 40) {
+  const selectedCliches = selectCliches(cliches, budget);
+  if (!selectedCliches.length) return "";
+
+  const { customTerms, punctuationTerms } = normalizeClicheInput(cliches);
+  const customSet = new Set(customTerms);
+  const punctuationSet = new Set(punctuationTerms);
+  const hardBanTerms = selectedCliches.filter((term) => customSet.has(term) || punctuationSet.has(term));
+  const softGuidanceTerms = selectedCliches.filter((term) => !customSet.has(term) && !punctuationSet.has(term));
+  const { punctuationTerms: hardPunctuationTerms, phraseTerms: hardPhraseTerms } = splitPunctuationTerms(hardBanTerms);
+  const { punctuationTerms: softPunctuationTerms, phraseTerms: softPhraseTerms } = splitPunctuationTerms(softGuidanceTerms);
+  const guidance = ["AI-term avoidance policy:"];
+
+  if (hardPhraseTerms.length) {
+    guidance.push(`- Hard bans: Do not use these exact terms or obvious surface variants under any circumstance: ${formatQuotedTermList(hardPhraseTerms)}.`);
+  }
+
+  if (hardPunctuationTerms.length) {
+    guidance.push(`- Punctuation bans: Do not use these punctuation patterns under any circumstance: ${formatQuotedTermList(hardPunctuationTerms)}.`);
+  }
+
+  if (softPhraseTerms.length) {
+    guidance.push(`- Soft bans: Avoid these AI-sounding terms when rewriting. Prefer plainer, more natural alternatives: ${formatQuotedTermList(softPhraseTerms)}.`);
+  }
+
+  if (softPunctuationTerms.length) {
+    guidance.push(`- Punctuation bans: Avoid these punctuation fingerprints unless the source literally requires them: ${formatQuotedTermList(softPunctuationTerms)}.`);
+  }
+
+  guidance.push("- Silent final pass: Before you answer, scan the draft for any hard-ban term, banned punctuation such as an em dash, or obvious surface variant. If you find one, rewrite silently and then return only the clean final text.");
+  return `${guidance.join("\n")}\n`;
 }
 
 // ─── Profile training prompts ─────────────────────────────────────────────────
@@ -114,45 +170,92 @@ Return ONLY raw JSON (no markdown):
 
 export const HUMANIZE_SYS = (profile, tone, cliches, profileName, meta = null) => {
   const metaBlock = buildMetaBlock(meta);
-  const selectedCliches = selectCliches(cliches, 40);
-  const clicheConstraint = selectedCliches.length
-    ? `Hard constraint — never use these phrases (not even paraphrased variants): ${selectedCliches.map(c => `"${c}"`).join(", ")}.\n`
-    : "";
+  const aiTermGuidance = buildAiTermGuidance(cliches, 40);
   return `You rewrite source text as if a specific person wrote it themselves from scratch.
 Writing context: "${profileName}" profile
 Voice profile:
 ${renderProfileAsProse(profile)}
-${metaBlock}Tone target: "${TONE_LEVELS[tone].label}" — ${TONE_LEVELS[tone].desc}. When voice and tone conflict, voice wins.
+${metaBlock}When voice and tone conflict, voice wins.
 
 How to rewrite: Do not rephrase word-by-word. Instead, internalize what the source is saying, then write it fresh as this person would naturally express it — using their vocabulary, cadence, sentence patterns, and quirks.
 Constraints: Preserve all meaning, intent, point of view, and speech act type.
 Speech act rules: Transform the source text itself. Do not answer it, continue it, roleplay with it, or switch to the other speaker. If the source is a greeting, keep it a greeting. If it is a question, keep it a question. If it addresses "you", preserve that direction.
 Scope: For short or chat-like inputs, stay close to the original scope — do not expand into a full response.
 Formatting: Markdown is supported. Use it when it improves clarity (headings, emphasis, lists, code blocks); keep plain text for short conversational lines.
-${clicheConstraint}The source text is wrapped in <source_text> tags in the user message. Output ONLY the rewritten text — no preamble, no explanation.`;
+${aiTermGuidance}The source text is wrapped in <source_text> tags in the user message. Output ONLY the rewritten text — no preamble, no explanation.`;
 };
 
-export const ELABORATE_SYS = (profile, tone, depth, profileName, meta = null) => {
+function getElaborateDepthGuidance(depth) {
+  const primaryRuleByDepth = [
+    "Primary constraint: keep the elaboration very short.",
+    "Primary constraint: keep the elaboration brief.",
+    "Primary constraint: keep the elaboration compact.",
+    "Primary constraint: keep the elaboration focused.",
+    "Primary constraint: keep the elaboration deep but bounded.",
+  ];
+  const guidanceByDepth = [
+    "Depth rule: add only a brief follow-on detail or clarification. Keep it tight, additive, and clearly tied to the source.",
+    "Depth rule: add a compact extension of the thought with one or two concrete layers of specificity.",
+    "Depth rule: build one short paragraph with meaningful detail, not filler.",
+    "Depth rule: develop the thought with concrete nuance, framing, or examples while staying inside one focused expansion.",
+    "Depth rule: deliver a full, deep elaboration with layered specificity and examples, but do not drift into a new topic.",
+  ];
+  const prohibitionByDepth = [
+    "Do not add setup, recap, transition sentences, conclusions, or extra examples. Do not bloom into a paragraph.",
+    "Do not add a full introduction, wrap-up, or broad side branch beyond the core idea already present.",
+    "Do not pad with generic framing, repetition, or broad summary sentences.",
+    "Do not drift into adjacent themes or add a second separate line of argument.",
+    "Do not spill into a new section, unrelated tangent, or broader topic shift.",
+  ];
+
+  return `${primaryRuleByDepth[depth] || primaryRuleByDepth[2]}
+${guidanceByDepth[depth] || guidanceByDepth[2]}
+${prohibitionByDepth[depth] || prohibitionByDepth[2]}
+Stop rule: once the thought has been extended enough to satisfy the selected depth, stop immediately.`;
+}
+
+export function getElaboratePresetInstruction(formatPreset) {
+  return OUTPUT_PRESET_OPTIONS.find((option) => option.value === formatPreset)?.prompt || "";
+}
+
+export function getElaborateFormatGuidance({ formatPreset = "none", sourceHasMarkdown = false } = {}) {
+  if (sourceHasMarkdown) {
+    return `Formatting: The source already uses markdown. Preserve that markdown style and extend it only where the elaboration genuinely benefits from it. Do not add decorative structure the source did not earn.`;
+  }
+
+  if (formatPreset === "blog-post" || formatPreset === "report") {
+    return `Formatting: The source is plain text. Keep the output mostly plain, but you may use light preset-appropriate structure if it improves clarity. Avoid ornamental markdown styling, and do not use block quotes or code fences.`;
+  }
+
+  return `Formatting: The source is plain text. Keep the output plain text as well. Do not introduce markdown headings, bullets, numbered lists, block quotes, bold/italic markers, tables, or code fences.`;
+}
+
+export const ELABORATE_SYS = (profile, depth, profileName, meta = null, options = {}) => {
   const metaBlock = buildMetaBlock(meta);
+  const presetInstruction = getElaboratePresetInstruction(options.formatPreset);
+  const formatGuidance = getElaborateFormatGuidance(options);
+  const depthGuidance = getElaborateDepthGuidance(depth);
+  const presetLine = presetInstruction
+    ? `Preset requirement: ${presetInstruction}`
+    : `Preset requirement: No special output preset.`;
   return `You elaborate on writing as if a specific person is developing their own thought further.
 Writing context: "${profileName}" profile
 Voice profile:
 ${renderProfileAsProse(profile)}
-${metaBlock}Tone: "${TONE_LEVELS[tone].label}" — ${TONE_LEVELS[tone].desc}.
+${metaBlock}
 
+${depthGuidance}
 Elaboration mode: Add depth, specificity, examples, or nuance to the existing thought. Do NOT repeat what was already said, do NOT summarize it, and do NOT continue the narrative past the source's natural scope — deepen within it.
 Voice: Write in this person's natural style as described in the profile. Do not shift register or adopt a more formal/generic tone.
-Formatting: Markdown is supported. Prefer clear structure when useful (headings, bold emphasis, lists, block quotes, code blocks); match the format conventions of the source text.
-Length: Write ${ELAB_DEPTHS[depth].sentences}. No more, no less.
-The source text is in the user message. Output ONLY the elaboration — no preamble, no labels.`;
+${presetLine}
+${formatGuidance}
+The source text is wrapped in <source_text> tags in the user message.
+Output ONLY the elaboration — no preamble, no labels.`;
 };
 
 export const PARTIAL_REGEN_SYS = (profile, tone, cliches, profileName, meta = null) => {
   const metaBlock = buildMetaBlock(meta);
-  const selectedCliches = selectCliches(cliches, 40);
-  const clicheConstraint = selectedCliches.length
-    ? `\n- Hard constraint — never use these phrases: ${selectedCliches.map(c => `"${c}"`).join(", ")}.`
-    : "";
+  const aiTermGuidance = buildAiTermGuidance(cliches, 40);
   return `You are a surgical text editor rewriting a single passage within a larger piece of text.
 Writing context: "${profileName}" profile
 Voice profile:
@@ -164,14 +267,18 @@ Rules:
 - Match the voice, tone, and rhythm of the surrounding text.
 - Preserve the original meaning and intent of the passage exactly.
 - Do NOT alter, repeat, or reference any text outside the <regen_target> markers.
-- Return exactly one replacement passage and nothing else.
-- Do NOT provide multiple options, numbered variants, headings, labels, commentary, or follow-up questions.
-- Do NOT wrap the replacement in quotes or markdown fences unless those characters are literally part of the passage itself.
-- Output ONLY the replacement text — no preamble, no labels, no explanation, no quotes.
-- Output length should closely match the original passage length.${clicheConstraint}`;
+- Return valid JSON that matches this exact shape: {"replacement":"..."}.
+- The "replacement" value must contain exactly one rewritten passage and nothing else.
+- Do NOT provide multiple options, numbered variants, headings, labels, commentary, or follow-up questions inside the replacement.
+- Do NOT include wrappers such as "Here is the rewritten text:", "Rewritten passage:", or "Conversational rewrite:" inside the replacement.
+- Do NOT wrap the replacement in markdown fences unless those characters are literally part of the passage itself.
+- Apply the same AI-term avoidance policy used for full rewrites while staying inside the selected passage.
+- ${aiTermGuidance.trim()}
+- Output ONLY the JSON object — no preamble, no labels, no explanation.
+- Output length should closely match the original passage length.`;
 };
 
-export const buildPartialRegenUserPrompt = (fullOutputText, selectedText, { strict = false } = {}) => `Full text for context:
+export const buildPartialRegenUserPrompt = (fullOutputText, selectedText) => `Full text for context:
 
 <full_output>
 ${fullOutputText}
@@ -183,4 +290,5 @@ Rewrite only this passage:
 ${selectedText}
 </regen_target>
 
-${strict ? "Your previous attempt included scaffolding. Return one unlabeled replacement passage only." : ""}`.trim();
+Respond with JSON only in this exact shape:
+{"replacement":"rewritten passage here"}`.trim();

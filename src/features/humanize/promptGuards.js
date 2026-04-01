@@ -1,3 +1,4 @@
+import { ELAB_DEPTHS, TONE_LEVELS } from "../../constants/tones.js";
 import { countWords } from "../../utils/index.js";
 
 const CONVERSATIONAL_OPENERS = [
@@ -27,13 +28,6 @@ const CONVERSATIONAL_OPENERS = [
   "what are",
 ];
 
-const PARTIAL_REGEN_OPTION_LIST_PATTERN = /(^|\n)\s*(?:[-*]\s*)?(?:option|version)\s*\d+\b/i;
-const PARTIAL_REGEN_META_LEADIN_PATTERN = /^(?:here(?:'s| is| are)\b.*(?:rewrite|rewritten|option|version)|below (?:is|are)\b.*(?:rewrite|rewritten|option|version)|i(?:'ve| have)? rewritten\b|rewrite options?\b|rewritten (?:text|passage)\b|replacement text\b|updated (?:text|passage|version)\b|edited (?:text|passage|version)\b)/i;
-const PARTIAL_REGEN_INLINE_LABEL_PATTERN = /^\s*(?:rewritten (?:text|passage)|replacement(?: text)?|updated (?:text|passage|version)|edited (?:text|passage|version)|rewrite)\s*:\s*/i;
-const PARTIAL_REGEN_TASK_REFERENCE_PATTERN = /\b(?:regen_target|selected passage|target passage|surrounding text|replacement text|rewrite options?)\b/i;
-const PARTIAL_REGEN_FOLLOW_UP_PATTERN = /(?:^|\n)\s*(?:which (?:tone|option|version)\b|let me know which\b|which one\b|which feels\b)/i;
-const PARTIAL_REGEN_EXPLANATION_PATTERN = /(?:^|\n)\s*(?:i chose|i kept|i preserved|this version|this rewrite|i made this|note:|explanation:)\b/i;
-
 function normalizeHumanizeText(text) {
   return String(text || "").trim().replace(/\s+/g, " ");
 }
@@ -51,66 +45,6 @@ function unwrapSurroundingQuotes(text) {
   const quotePairs = new Set(['""', "''", "“”", "‘’"]);
   if (!quotePairs.has(`${first}${last}`)) return trimmed;
   return trimmed.slice(1, -1).trim();
-}
-
-function stripLeadingMeta(text) {
-  let working = String(text || "").trimStart();
-  if (!working) return "";
-
-  while (true) {
-    const before = working;
-    working = working.replace(PARTIAL_REGEN_INLINE_LABEL_PATTERN, "");
-
-    const paragraphMatch = working.match(/^([^\n]+)\n\s*\n([\s\S]+)$/);
-    if (paragraphMatch && PARTIAL_REGEN_META_LEADIN_PATTERN.test(paragraphMatch[1].trim())) {
-      working = paragraphMatch[2].trimStart();
-    }
-
-    const lineMatch = working.match(/^([^\n]+)\n([\s\S]+)$/);
-    if (lineMatch && PARTIAL_REGEN_META_LEADIN_PATTERN.test(lineMatch[1].trim())) {
-      working = lineMatch[2].trimStart();
-    }
-
-    const inlineMatch = working.match(/^([^\n]{0,120}):\s+([\s\S]+)$/);
-    if (
-      inlineMatch
-      && PARTIAL_REGEN_META_LEADIN_PATTERN.test(inlineMatch[1].trim())
-      && !PARTIAL_REGEN_OPTION_LIST_PATTERN.test(inlineMatch[2])
-    ) {
-      working = inlineMatch[2].trimStart();
-    }
-
-    if (working === before) break;
-  }
-
-  return working.trim();
-}
-
-function stripTrailingFollowUp(text) {
-  let working = String(text || "").trim();
-  if (!working) return "";
-
-  const followUpSplit = working.match(/^([\s\S]*?)\n\s*\n((?:which (?:tone|option|version)\b|let me know which\b|which one\b|which feels\b)[\s\S]*)$/i);
-  if (followUpSplit) {
-    working = followUpSplit[1].trim();
-  }
-
-  return working.trim();
-}
-
-function hasPartialRegenMetaSignals(text) {
-  const normalized = String(text || "").trim();
-  if (!normalized) return false;
-
-  return (
-    PARTIAL_REGEN_OPTION_LIST_PATTERN.test(normalized) ||
-    PARTIAL_REGEN_META_LEADIN_PATTERN.test(normalized) ||
-    PARTIAL_REGEN_TASK_REFERENCE_PATTERN.test(normalized) ||
-    PARTIAL_REGEN_FOLLOW_UP_PATTERN.test(normalized) ||
-    PARTIAL_REGEN_EXPLANATION_PATTERN.test(normalized) ||
-    /^\s*#{1,6}\s+/.test(normalized) ||
-    /```/.test(normalized)
-  );
 }
 
 export function analyzeHumanizeInput(text) {
@@ -134,10 +68,41 @@ export function analyzeHumanizeInput(text) {
   };
 }
 
-export function buildHumanizeUserPrompt(text, { strict = false } = {}) {
+const ELABORATE_MARKDOWN_PATTERNS = [
+  /^\s{0,3}#{1,6}\s+\S/m,
+  /^\s{0,3}(?:[-*+]\s+\S|\d+\.\s+\S)/m,
+  /^\s{0,3}>\s+\S/m,
+  /```[\s\S]*?```/,
+  /^\s*\|.+\|\s*$/m,
+  /\[[^\]]+\]\((?:https?:\/\/|mailto:|tel:)[^)]+\)/,
+];
+
+function detectStructuredMarkdown(text) {
+  const normalized = String(text || "").replace(/\r\n/g, "\n").trim();
+  if (!normalized) return false;
+  return ELABORATE_MARKDOWN_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export function analyzeElaborateInput(text) {
+  const normalized = String(text || "").replace(/\r\n/g, "\n").trim();
+  return {
+    normalized,
+    wordCount: countWords(normalized),
+    sourceHasMarkdown: detectStructuredMarkdown(normalized),
+  };
+}
+
+function getToneInstructionLine(tone) {
+  const toneConfig = TONE_LEVELS[tone] || TONE_LEVELS[2];
+  return `Tone target: "${toneConfig.label}" — ${toneConfig.desc}.`;
+}
+
+export function buildHumanizeUserPrompt(text, { strict = false, tone = 2, oneOffInstruction = "" } = {}) {
+  const trimmedOneOffInstruction = String(oneOffInstruction || "").trim();
   const analysis = analyzeHumanizeInput(text);
   const guardrails = [
-    "Rewrite the source text below in the target voice.",
+    "Rewrite the source text below using the style instructions already provided.",
+    getToneInstructionLine(tone),
     "Transform the source text itself. Do not answer it, continue it, or switch to the other speaker.",
   ];
 
@@ -153,8 +118,37 @@ export function buildHumanizeUserPrompt(text, { strict = false } = {}) {
   if (strict) {
     guardrails.push("Your previous attempt drifted into a response. Rewrite the source itself this time.");
   }
+  if (trimmedOneOffInstruction) {
+    guardrails.push(`Extra instruction: ${trimmedOneOffInstruction}`);
+  }
 
   return `${guardrails.join("\n")}\n\n<source_text>\n${String(text || "").trim()}\n</source_text>`;
+}
+
+function getElaborateDepthTargetLine(depth) {
+  const depthConfig = ELAB_DEPTHS[depth] || ELAB_DEPTHS[2];
+  return `Depth target: ${depthConfig.sentences}.`;
+}
+
+export function buildElaborateUserPrompt(
+  text,
+  { sourceHasMarkdown = false, depth = 2, tone = 2, oneOffInstruction = "" } = {}
+) {
+  const trimmedOneOffInstruction = String(oneOffInstruction || "").trim();
+  const normalized = String(text || "").trim();
+  const sourceFormat = sourceHasMarkdown ? "markdown" : "plain_text";
+  const guardrails = [
+    "Elaborate on the source text below using the style instructions already provided.",
+    getToneInstructionLine(tone),
+    "Deepen the existing thought rather than answering it, summarizing it, or continuing beyond its natural scope.",
+    getElaborateDepthTargetLine(depth),
+    `Source format: ${sourceFormat}.`,
+  ];
+  if (trimmedOneOffInstruction) {
+    guardrails.push(`Extra instruction: ${trimmedOneOffInstruction}`);
+  }
+
+  return `${guardrails.join("\n")}\n\n<source_text>\n${normalized}\n</source_text>`;
 }
 
 export function outputLooksLikeAnsweredPrompt(sourceText, outputText) {
@@ -177,33 +171,180 @@ export function outputLooksLikeAnsweredPrompt(sourceText, outputText) {
   return suspicion >= 2;
 }
 
-export function sanitizePartialRegenOutput(text) {
+const PRETEXT_PREFIX_PATTERNS = [
+  /^\s*\*{0,2}(?:sure|certainly|absolutely|of course)[,!]?\s+(?:here(?:'|’)s|is)\b[^:\n]{0,160}:\*{0,2}\s*/i,
+  /^\s*\*{0,2}here(?:'|’)s\b[^:\n]{0,200}:\*{0,2}\s*/i,
+  /^\s*\*{0,2}here\s+is\b[^:\n]{0,200}:\*{0,2}\s*/i,
+  /^\s*\*{0,2}(?:rewritten|revised|casual|conversational)\s+(?:text|version|rewrite|passage|draft)\s*:\*{0,2}\s*/i,
+  /^\s*\*{0,2}(?:rewrite|rewritten|revised|refined|updated|humanized|elaborated)\s+(?:passage|text|version|draft|output)\s*:\*{0,2}\s*/i,
+];
+
+const PROMPT_WRAPPER_TAGS = [
+  "source_text",
+  "target_voice",
+  "regen_target",
+  "full_output",
+];
+
+const REASONING_TAGS = [
+  "thinking",
+  "reasoning",
+  "analysis",
+];
+
+function unwrapKnownPromptWrapper(text) {
+  const trimmed = String(text || "").trim();
+  for (const tagName of PROMPT_WRAPPER_TAGS) {
+    const wholeWrapper = new RegExp(`^<${tagName}>\\s*([\\s\\S]*?)\\s*<\\/${tagName}>$`, "i");
+    const wrappedMatch = trimmed.match(wholeWrapper);
+    if (wrappedMatch) {
+      return {
+        text: wrappedMatch[1].trim(),
+        removedPrefix: `<${tagName}>`,
+      };
+    }
+  }
+
+  let working = trimmed;
+  let removedPrefix = "";
+  let changed = false;
+  for (const tagName of PROMPT_WRAPPER_TAGS) {
+    const openingTag = new RegExp(`^<${tagName}>\\s*`, "i");
+    const closingTag = new RegExp(`\\s*<\\/${tagName}>$`, "i");
+    if (openingTag.test(working)) {
+      working = working.replace(openingTag, "").trim();
+      removedPrefix = `<${tagName}>`;
+      changed = true;
+      break;
+    }
+    if (closingTag.test(working)) {
+      working = working.replace(closingTag, "").trim();
+      removedPrefix = `</${tagName}>`;
+      changed = true;
+      break;
+    }
+  }
+
+  return {
+    text: changed ? working : trimmed,
+    removedPrefix,
+  };
+}
+
+function stripLeadingPretextPrefix(text) {
+  const working = String(text || "");
+  for (const pattern of PRETEXT_PREFIX_PATTERNS) {
+    const match = working.match(pattern);
+    if (!match) continue;
+    return {
+      text: working.slice(match[0].length).trim(),
+      removedPrefix: match[0].trim(),
+      changed: true,
+    };
+  }
+
+  return {
+    text: working,
+    removedPrefix: "",
+    changed: false,
+  };
+}
+
+function stripLeadingReasoningArtifacts(text) {
+  let working = String(text || "").trim();
+  let changed = false;
+
+  while (working) {
+    let matched = false;
+    for (const tagName of REASONING_TAGS) {
+      const wholeBlockPattern = new RegExp(`^<${tagName}>\\s*[\\s\\S]*?\\s*<\\/${tagName}>\\s*`, "i");
+      const leadingWholeBlock = working.match(wholeBlockPattern);
+      if (leadingWholeBlock) {
+        working = working.slice(leadingWholeBlock[0].length).trim();
+        changed = true;
+        matched = true;
+        break;
+      }
+
+      const openingTagPattern = new RegExp(`^<${tagName}>\\s*`, "i");
+      const openingTagMatch = working.match(openingTagPattern);
+      if (openingTagMatch) {
+        working = "";
+        changed = true;
+        matched = true;
+        break;
+      }
+
+      const closingTagPattern = new RegExp(`^<\\/${tagName}>\\s*`, "i");
+      const closingTagMatch = working.match(closingTagPattern);
+      if (closingTagMatch) {
+        working = working.slice(closingTagMatch[0].length).trim();
+        changed = true;
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched) break;
+  }
+
+  return {
+    text: working,
+    hadReasoning: changed,
+  };
+}
+
+export function sanitizeGeneratedOutput(text) {
   const raw = String(text || "").replace(/\r\n/g, "\n");
-  if (!raw.trim()) return "";
-  if (PARTIAL_REGEN_OPTION_LIST_PATTERN.test(raw)) return "";
+  if (!raw.trim()) {
+    return { text: "", hadWrapper: false, removedPrefix: "", hadReasoning: false };
+  }
 
   let working = unwrapWholeCodeFence(raw);
-  working = stripLeadingMeta(working);
-  working = stripTrailingFollowUp(working);
   working = unwrapSurroundingQuotes(working);
   working = working.trim();
 
-  if (!working) return "";
-  if (PARTIAL_REGEN_OPTION_LIST_PATTERN.test(working)) return "";
-  if (PARTIAL_REGEN_TASK_REFERENCE_PATTERN.test(working)) return "";
-  if (PARTIAL_REGEN_EXPLANATION_PATTERN.test(working)) return "";
-  if (PARTIAL_REGEN_FOLLOW_UP_PATTERN.test(working)) return "";
+  let removedPrefix = "";
+  let hadWrapper = false;
+  let hadReasoning = false;
 
-  return working;
+  for (let pass = 0; pass < 6; pass += 1) {
+    let changed = false;
+
+    const unwrapped = unwrapKnownPromptWrapper(working);
+    if (unwrapped.removedPrefix) {
+      removedPrefix ||= unwrapped.removedPrefix;
+      hadWrapper = true;
+      working = unwrapped.text;
+      changed = true;
+    }
+
+    const strippedPrefix = stripLeadingPretextPrefix(working);
+    if (strippedPrefix.changed) {
+      removedPrefix ||= strippedPrefix.removedPrefix;
+      hadWrapper = true;
+      working = strippedPrefix.text;
+      changed = true;
+    }
+
+    const strippedReasoning = stripLeadingReasoningArtifacts(working);
+    if (strippedReasoning.hadReasoning) {
+      hadReasoning = true;
+      working = strippedReasoning.text;
+      changed = true;
+    }
+
+    if (!changed) break;
+  }
+
+  return {
+    text: working,
+    hadWrapper,
+    removedPrefix,
+    hadReasoning,
+  };
 }
 
-export function outputLooksLikeMetaPartialRegen(outputText) {
-  const raw = String(outputText || "").trim();
-  if (!raw) return false;
-  if (PARTIAL_REGEN_OPTION_LIST_PATTERN.test(raw)) return true;
-  if (hasPartialRegenMetaSignals(raw)) {
-    const sanitized = sanitizePartialRegenOutput(raw);
-    return !sanitized || sanitized !== raw;
-  }
-  return false;
+export function sanitizePartialRegenOutput(text) {
+  return sanitizeGeneratedOutput(text).text;
 }

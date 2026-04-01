@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import OutputPanel from "./OutputPanel.jsx";
 
 let mockEditor = null;
+let mockEditorConfigs = [];
 
 function createMockEditor(text, selection = { from: 0, to: 0 }) {
   const listeners = new Map();
@@ -60,8 +61,17 @@ vi.mock("@tiptap/core", () => ({
 }));
 
 vi.mock("@tiptap/react", () => ({
-  useEditor: () => mockEditor,
+  useEditor: (config) => {
+    mockEditorConfigs.push(config);
+    return mockEditor;
+  },
   EditorContent: () => <div data-testid="mock-editor" />,
+}));
+
+vi.mock("@tiptap/extension-link", () => ({
+  default: {
+    configure: () => ({}),
+  },
 }));
 
 vi.mock("@tiptap/starter-kit", () => ({
@@ -87,9 +97,10 @@ vi.mock("../utils/diff.js", () => ({
   buildClicheRanges: () => [],
 }));
 
-vi.mock("../utils/markdown.js", () => ({
-  renderMarkdownToHtml: (text) => text,
-}));
+vi.mock("../utils/markdown.js", async () => {
+  const actual = await vi.importActual("../utils/markdown.js");
+  return actual;
+});
 
 vi.mock("./GenerationLoadingToast.jsx", () => ({
   default: () => null,
@@ -186,6 +197,7 @@ const baseProps = {
 describe("OutputPanel partial regeneration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEditorConfigs = [];
     mockEditor = createMockEditor(baseProps.outputText, { from: 2, to: baseProps.outputText.length - 2 });
 
     vi.spyOn(window, "getSelection").mockReturnValue({
@@ -249,6 +261,24 @@ describe("OutputPanel partial regeneration", () => {
     );
   });
 
+  test("does not absorb the next sentence word when selection ends after punctuation and space", async () => {
+    const onPartialRegen = vi.fn();
+    const outputText = "Alpha bravo charlie delta echo foxtrot. Next word closes here.";
+    const sentenceBoundaryEnd = "Alpha bravo charlie delta echo foxtrot. ".length;
+    mockEditor = createMockEditor(outputText, { from: 0, to: sentenceBoundaryEnd });
+
+    render(<OutputPanel {...baseProps} outputText={outputText} outputWords={6} onPartialRegen={onPartialRegen} />);
+
+    fireEvent.pointerUp(document);
+    fireEvent.click(await screen.findByText("Regenerate"));
+
+    expect(onPartialRegen).toHaveBeenCalledWith(
+      "Alpha bravo charlie delta echo foxtrot. ",
+      0,
+      sentenceBoundaryEnd
+    );
+  });
+
   test("clamps the regenerate tooltip inside the output container", async () => {
     render(<OutputPanel {...baseProps} />);
 
@@ -305,5 +335,37 @@ describe("OutputPanel partial regeneration", () => {
         })
       );
     });
+  });
+
+  test("normalizes markdown-heavy output for both Tiptap editor surfaces", () => {
+    render(
+      <OutputPanel
+        {...baseProps}
+        outputText={"# Stage 1: RETRIEVAL\n\n- Dense Retrieval\n- Sparse Retrieval\n\n| Term | Meaning |\n| --- | --- |\n| **Vector Store / VectorDB** | Database storing embedded chunks |"}
+      />
+    );
+
+    expect(mockEditorConfigs.length).toBeGreaterThanOrEqual(1);
+    for (const config of mockEditorConfigs) {
+      expect(config.content).toContain("<h1>Stage 1: RETRIEVAL</h1>");
+      expect(config.content).toContain("<ul>");
+      expect(config.content).toContain("<strong>Term:</strong> Vector Store / VectorDB");
+      expect(config.content).not.toContain("| --- |");
+      expect(config.content).not.toContain("<table>");
+    }
+  });
+
+  test("does not mount the hidden completed-state output editor after streaming", () => {
+    render(<OutputPanel {...baseProps} />);
+
+    expect(
+      mockEditorConfigs.some((config) => config.editorProps?.attributes?.class?.includes("tiptap-output-editor"))
+    ).toBe(false);
+  });
+
+  test("shows a visible badge when the response likely hit the token limit", () => {
+    render(<OutputPanel {...baseProps} outputLikelyHitTokenLimit />);
+
+    expect(screen.getByLabelText("Response may be truncated by token limit")).toHaveTextContent("Near token limit");
   });
 });

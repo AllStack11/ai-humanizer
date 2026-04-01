@@ -7,7 +7,7 @@ export const TONE_LEVELS = [
 ];
 
 export const ELAB_DEPTHS = [
-  { label: "One sentence",   desc: "A tight single follow-on", sentences: "exactly 1 sentence" },
+  { label: "One sentence",   desc: "A very short follow-on",   sentences: "1–2 short sentences" },
   { label: "Brief",          desc: "2–3 sentences",            sentences: "2–3 sentences" },
   { label: "Standard",       desc: "A short paragraph",        sentences: "3–5 sentences" },
   { label: "Expanded",       desc: "A fuller paragraph",       sentences: "5–7 sentences" },

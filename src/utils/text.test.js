@@ -88,6 +88,16 @@ describe("text metrics", () => {
     expect(expanded).toEqual({ start: 6, end: 11, text: "bravo" });
   });
 
+  test("does not absorb the next word when the selection ends after sentence punctuation", () => {
+    const expanded = expandSelectionToWordBoundaries("First sentence. Next word", 0, 16);
+    expect(expanded).toEqual({ start: 0, end: 16, text: "First sentence. " });
+  });
+
+  test("still absorbs the next word when the selection ends inside it", () => {
+    const expanded = expandSelectionToWordBoundaries("First sentence. Next word", 0, 17);
+    expect(expanded).toEqual({ start: 0, end: 20, text: "First sentence. Next" });
+  });
+
   test("maps visible offsets to raw markdown offsets", () => {
     const raw = "**alpha** bravo";
     expect(mapVisibleOffsetToRawOffset(raw, 5)).toBe(7);

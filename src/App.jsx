@@ -19,7 +19,14 @@ import {
   getApiKeyStatus, storeApiKey, clearStoredApiKey,
   logDiagnosticEvent, resetAppData,
 } from './lib/storage.js';
-import { STYLE_ANALYZE_SYS, STYLE_MERGE_SYS, HUMANIZE_SYS, ELABORATE_SYS, PARTIAL_REGEN_SYS, buildPartialRegenUserPrompt } from './lib/prompts.js';
+import {
+  STYLE_ANALYZE_SYS,
+  STYLE_MERGE_SYS,
+  HUMANIZE_SYS,
+  ELABORATE_SYS,
+  PARTIAL_REGEN_SYS,
+  buildPartialRegenUserPrompt,
+} from './lib/prompts.js';
 import {
   classifyRequestIssue,
   dedupeSampleEntries,
@@ -27,14 +34,15 @@ import {
   isMissingApiKeyError,
   isAbortLikeError,
   isPlainObject,
+  parsePartialRegenPayload,
   normalizeProfileObject,
   parseJsonFromModelOutput,
 } from "./features/app/helpers.js";
 import {
+  analyzeElaborateInput,
+  buildElaborateUserPrompt,
   buildHumanizeUserPrompt,
-  outputLooksLikeMetaPartialRegen,
-  outputLooksLikeAnsweredPrompt,
-  sanitizePartialRegenOutput,
+  sanitizeGeneratedOutput,
 } from "./features/humanize/promptGuards.js";
 import { useProcessLog } from "./features/process/useProcessLog.js";
 import { filterProfileForContext, describeProfileFilter } from "./lib/profileFilter.js";
@@ -43,6 +51,7 @@ import { filterProfileForContext, describeProfileFilter } from "./lib/profileFil
 import {
   countWords,
   estimateTokenCount,
+  splitSentences,
   computeTextMetricSnapshot,
   computeWordCharDelta,
   stitchReplacementIntoText,
@@ -71,6 +80,7 @@ import { Button, Input } from "./components/AppUI.jsx";
 
 const AI_TERMS_STORAGE_KEY = "cliches-v3";
 const AI_TERMS_TIMESTAMP_STORAGE_KEY = "cliches-ts-v3";
+const MAX_GENERATED_AI_TERMS = 60;
 
 function normalizeAiTermList(terms) {
   if (!Array.isArray(terms)) return [];
@@ -86,6 +96,7 @@ function normalizeStoredAiTerms(rawTerms, legacyTimestamp = null) {
     return {
       generatedTerms: normalizeAiTermList(rawTerms),
       customTerms: [],
+      punctuationTerms: [],
       hiddenTerms: [],
       updatedAt: typeof legacyTimestamp === "string" ? legacyTimestamp : null,
     };
@@ -95,6 +106,7 @@ function normalizeStoredAiTerms(rawTerms, legacyTimestamp = null) {
     return {
       generatedTerms: [],
       customTerms: [],
+      punctuationTerms: [],
       hiddenTerms: [],
       updatedAt: typeof legacyTimestamp === "string" ? legacyTimestamp : null,
     };
@@ -102,12 +114,15 @@ function normalizeStoredAiTerms(rawTerms, legacyTimestamp = null) {
 
   const generatedTerms = normalizeAiTermList(rawTerms.generatedTerms);
   const customTerms = normalizeAiTermList(rawTerms.customTerms);
+  const punctuationTerms = normalizeAiTermList(rawTerms.punctuationTerms);
   const hiddenSet = new Set(normalizeAiTermList(rawTerms.hiddenTerms));
   customTerms.forEach((term) => hiddenSet.delete(term));
+  punctuationTerms.forEach((term) => hiddenSet.delete(term));
 
   return {
     generatedTerms,
     customTerms,
+    punctuationTerms,
     hiddenTerms: [...hiddenSet],
     updatedAt: typeof rawTerms.updatedAt === "string" ? rawTerms.updatedAt : (typeof legacyTimestamp === "string" ? legacyTimestamp : null),
   };
@@ -117,6 +132,7 @@ function buildAiTermsStoragePayload(aiTerms) {
   return {
     generatedTerms: normalizeAiTermList(aiTerms?.generatedTerms),
     customTerms: normalizeAiTermList(aiTerms?.customTerms),
+    punctuationTerms: normalizeAiTermList(aiTerms?.punctuationTerms),
     hiddenTerms: normalizeAiTermList(aiTerms?.hiddenTerms),
     updatedAt: typeof aiTerms?.updatedAt === "string" ? aiTerms.updatedAt : null,
   };
@@ -125,12 +141,15 @@ function buildAiTermsStoragePayload(aiTerms) {
 function buildVisibleAiTerms(aiTerms) {
   const generatedTerms = normalizeAiTermList(aiTerms?.generatedTerms);
   const customTerms = normalizeAiTermList(aiTerms?.customTerms);
+  const punctuationTerms = normalizeAiTermList(aiTerms?.punctuationTerms);
   const hiddenTerms = new Set(normalizeAiTermList(aiTerms?.hiddenTerms));
   const customSet = new Set(customTerms);
+  const punctuationSet = new Set(punctuationTerms);
 
   return {
-    generatedTerms: generatedTerms.filter((term) => !hiddenTerms.has(term) && !customSet.has(term)),
+    generatedTerms: generatedTerms.filter((term) => !hiddenTerms.has(term) && !customSet.has(term) && !punctuationSet.has(term)),
     customTerms,
+    punctuationTerms,
   };
 }
 
@@ -223,6 +242,7 @@ export default function App() {
   const [showDiff, setShowDiff] = useState(false);
   const [outputPhase, setOutputPhase] = useState("idle");
   const [toneLevel, setToneLevel]   = useState(2);
+  const [elaborateToneLevel, setElaborateToneLevel] = useState(2);
   const [stripCliches, setStripCliches] = useState(true);
   const [elabDepth, setElabDepth]   = useState(2);
   const [oneOffInstruction, setOneOffInstruction] = useState("");
@@ -255,6 +275,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [requestLoading, setRequestLoading] = useState(false);
   const [outputUsage, setOutputUsage] = useState(null);
+  const [outputLikelyHitTokenLimit, setOutputLikelyHitTokenLimit] = useState(false);
   const [inputUsage, setInputUsage] = useState(null);
   const [profileMergeLoading, setProfileMergeLoading] = useState(false);
   const [mergeProgressOpen, setMergeProgressOpen] = useState(false);
@@ -296,7 +317,11 @@ export default function App() {
   );
   const visibleAiTerms = useMemo(() => buildVisibleAiTerms(aiTerms), [aiTerms]);
   const cliches = useMemo(
-    () => [...visibleAiTerms.generatedTerms, ...visibleAiTerms.customTerms],
+    () => ({
+      generatedTerms: visibleAiTerms.generatedTerms,
+      customTerms: visibleAiTerms.customTerms,
+      punctuationTerms: visibleAiTerms.punctuationTerms,
+    }),
     [visibleAiTerms]
   );
   const clichesUpdatedAt = useMemo(
@@ -989,6 +1014,20 @@ export default function App() {
     setTimeout(() => setStatus(""), 1600);
   }
 
+  async function addPunctuationCliche(term) {
+    const normalized = normalizeAiTermList([term])[0];
+    if (!normalized) return;
+    const currentAiTerms = aiTermsRef.current;
+    const nextAiTerms = {
+      ...currentAiTerms,
+      punctuationTerms: [...currentAiTerms.punctuationTerms, normalized],
+      hiddenTerms: currentAiTerms.hiddenTerms.filter((entry) => entry !== normalized),
+    };
+    await persistAiTerms(nextAiTerms);
+    setStatus(`Added "${normalized}" to punctuation bans.`);
+    setTimeout(() => setStatus(""), 1600);
+  }
+
   async function removeCustomCliche(term) {
     const normalized = normalizeAiTermList([term])[0];
     if (!normalized) return;
@@ -998,6 +1037,18 @@ export default function App() {
       customTerms: currentAiTerms.customTerms.filter((entry) => entry !== normalized),
     });
     setStatus(`Removed "${normalized}" from custom AI terms.`);
+    setTimeout(() => setStatus(""), 1600);
+  }
+
+  async function removePunctuationCliche(term) {
+    const normalized = normalizeAiTermList([term])[0];
+    if (!normalized) return;
+    const currentAiTerms = aiTermsRef.current;
+    await persistAiTerms({
+      ...currentAiTerms,
+      punctuationTerms: currentAiTerms.punctuationTerms.filter((entry) => entry !== normalized),
+    });
+    setStatus(`Removed "${normalized}" from punctuation bans.`);
     setTimeout(() => setStatus(""), 1600);
   }
 
@@ -1013,6 +1064,20 @@ export default function App() {
     setTimeout(() => setStatus(""), 1600);
   }
 
+  async function clearAllAiTerms() {
+    const currentAiTerms = aiTermsRef.current || normalizeStoredAiTerms(null);
+    await persistAiTerms({
+      ...currentAiTerms,
+      generatedTerms: [],
+      customTerms: [],
+      punctuationTerms: [],
+      hiddenTerms: [],
+      updatedAt: null,
+    });
+    setStatus("Cleared all AI terms.");
+    setTimeout(() => setStatus(""), 1600);
+  }
+
   // ── Clichés ──
   async function refreshCliches(currentAiTerms = aiTermsRef.current) {
     setClicheFetching(true);
@@ -1021,7 +1086,7 @@ export default function App() {
       const raw = await llm("", CLICHE_PROMPT, 1400, featureModel, runtimeConfig);
       const fresh = JSON.parse(raw.replace(/```json|```/g,"").trim());
       if (Array.isArray(fresh) && fresh.length > 20) {
-        const generatedTerms = normalizeAiTermList(fresh);
+        const generatedTerms = normalizeAiTermList(fresh).slice(0, MAX_GENERATED_AI_TERMS);
         if (generatedTerms.length <= 20) throw new Error("Refresh returned too few usable AI terms.");
         const nowIso = new Date().toISOString();
         const latestAiTerms = aiTermsRef.current || currentAiTerms || normalizeStoredAiTerms(null);
@@ -1250,26 +1315,49 @@ export default function App() {
   function computeMaxTokens(sourceText, requestMode, depth) {
     const words = countWords(sourceText);
     if (requestMode === "elaborate") {
-      // Elaborate output is bounded by ELAB_DEPTHS sentence counts; map depth to token ceiling
-      const TOKEN_BY_DEPTH = [80, 150, 280, 460, 700];
-      return TOKEN_BY_DEPTH[depth] ?? 280;
+      const TOKEN_BY_DEPTH = [180, 260, 420, 620, 860];
+      const dynamicBudget = Math.round(words * 3.2);
+      return Math.min(2200, Math.max(TOKEN_BY_DEPTH[depth] ?? 420, dynamicBudget));
     }
     if (requestMode === "partial") {
-      return Math.min(1200, Math.max(150, Math.round(words * 2.5)));
+      return Math.min(700, Math.max(180, Math.round(words * 2.2)));
     }
-    // humanize: ~1.2x expansion + 50% safety buffer
-    return Math.min(2400, Math.max(300, Math.round(words * 1.8)));
+    const FULL_OUTPUT_BUDGET_BY_DEPTH = [900, 1400, 2200, 3200, 4400];
+    const dynamicBudget = Math.round(words * 5.5);
+    return Math.min(7000, Math.max(FULL_OUTPUT_BUDGET_BY_DEPTH[depth] ?? 2200, dynamicBudget));
+  }
+
+  function responseLikelyHitTokenCap(usage, maxTokens) {
+    const completionTokens = Number(usage?.completionTokens);
+    return Number.isFinite(completionTokens) && Number.isFinite(maxTokens) && completionTokens >= Math.floor(maxTokens * 0.96);
+  }
+
+  function getElaborateSentenceBounds(depth) {
+    switch (depth) {
+      case 0: return { min: 1, max: 2 };
+      case 1: return { min: 2, max: 3 };
+      case 2: return { min: 3, max: 5 };
+      case 3: return { min: 5, max: 7 };
+      case 4: return { min: 7, max: 10 };
+      default: return { min: 3, max: 5 };
+    }
+  }
+
+  function countElaborateOutputSentences(text) {
+    const normalized = String(text || "").trim();
+    if (!normalized) return 0;
+    const sentences = splitSentences(normalized);
+    return sentences.length || 1;
   }
 
   // Temperature by tone level: Very Casual (1.1) → Formal (0.6)
   // Higher tone = lower temp for measured output; lower tone = higher temp for natural variation
   const TEMP_BY_TONE = [1.1, 1.0, 0.9, 0.75, 0.6];
 
-  function applyPromptDecorators(systemPrompt) {
-    const presetInstruction = getFormatPresetInstruction(formatPreset);
-    const extras = [presetInstruction, oneOffInstruction.trim()].filter(Boolean);
-    if (!extras.length) return systemPrompt;
-    return `${systemPrompt}\n\nExtra constraints:\n- ${extras.join("\n- ")}`;
+  function applyPromptDecorators(systemPrompt, { includePreset = true } = {}) {
+    const presetInstruction = includePreset ? getFormatPresetInstruction(formatPreset) : "";
+    if (!presetInstruction) return systemPrompt;
+    return `${systemPrompt}\n\nExtra constraints:\n- ${presetInstruction}`;
   }
 
   function clearOutputState() {
@@ -1277,6 +1365,7 @@ export default function App() {
     setOutputText("");
     setOutputBaseline("");
     setOutputUsage(null);
+    setOutputLikelyHitTokenLimit(false);
     setOutputCopied(false);
     setShowDiff(true);
     setOutputPhase("idle");
@@ -1287,6 +1376,7 @@ export default function App() {
     setOutputText("");
     setOutputBaseline("");
     setOutputUsage(null);
+    setOutputLikelyHitTokenLimit(false);
     setOutputCopied(false);
     setShowDiff(true);
     setOutputPhase("streaming");
@@ -1409,10 +1499,33 @@ export default function App() {
       );
       const partialOptions = {
         temperature: 0.7,
-        onUsage: (usage) => setOutputUsage(normalizeUsage(usage)),
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "partial_regeneration",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                replacement: { type: "string" },
+              },
+              required: ["replacement"],
+            },
+          },
+        },
+        onUsage: (usage) => {
+          latestPartialUsage = normalizeUsage(usage);
+          setOutputUsage(latestPartialUsage);
+        },
       };
+      const partialMaxTokens = computeMaxTokens(selectedText, "partial");
+      let latestPartialUsage = null;
+      let loggedReasoningCleanup = false;
       const streamReplacement = async (streamSystemPrompt, userPrompt, firstChunkMessage) => {
         let loggedFirstChunk = false;
+        let loggedParsedPayload = false;
+        let loggedStrippedWrapper = false;
         const waitNoticeId = window.setTimeout(() => {
           if (!loggedFirstChunk) {
             pushProcessStep("Still waiting for the model to start streaming. OpenRouter may be queueing the request.", "warning");
@@ -1424,7 +1537,26 @@ export default function App() {
             streamSystemPrompt,
             userPrompt,
             (_, full) => {
-              const sanitized = sanitizePartialRegenOutput(full);
+              let sanitized = "";
+              try {
+                const parsed = parsePartialRegenPayload(full);
+                if (!loggedParsedPayload) {
+                  loggedParsedPayload = true;
+                  pushProcessStep("Structured replacement payload parsed successfully.", "info");
+                }
+                const cleaned = sanitizeGeneratedOutput(parsed.replacement);
+                sanitized = cleaned.text;
+                if (cleaned.hadWrapper && !loggedStrippedWrapper) {
+                  loggedStrippedWrapper = true;
+                  pushProcessStep("Removed wrapper text from the replacement output.", "info");
+                }
+                if (cleaned.hadReasoning && !loggedReasoningCleanup) {
+                  loggedReasoningCleanup = true;
+                  pushProcessStep("Removed reasoning text from the replacement output.", "info");
+                }
+              } catch {
+                sanitized = "";
+              }
               const nextOutput = sanitized
                 ? stitchReplacementIntoText(snapBefore, sanitized, snapAfter)
                 : fullOutputSnapshot;
@@ -1438,7 +1570,7 @@ export default function App() {
                 pushProcessStep(firstChunkMessage, "info");
               }
             },
-            computeMaxTokens(selectedText, "partial"),
+            partialMaxTokens,
             featureModel,
             runtimeConfig,
             partialOptions
@@ -1449,29 +1581,37 @@ export default function App() {
       };
 
       pushProcessStep("Preparing prompt and opening model stream.");
-      let result = await streamReplacement(
+      const result = await streamReplacement(
         systemPrompt,
         buildPartialRegenUserPrompt(fullOutputSnapshot, selectedText),
         "Model stream connected. Receiving replacement output."
       );
-      let finalized = sanitizePartialRegenOutput(result);
-
-      if (!finalized || outputLooksLikeMetaPartialRegen(result)) {
-        pushProcessStep("Partial draft looked like scaffolding instead of a replacement. Retrying with stricter guardrails.", "info");
-        result = await streamReplacement(
-          `${systemPrompt}\n\nCritical constraint:\n- Return exactly one replacement passage and nothing else.\n- Never provide multiple options, labels, explanations, or follow-up questions.`,
-          buildPartialRegenUserPrompt(fullOutputSnapshot, selectedText, { strict: true }),
-          "Retry stream connected. Receiving guarded replacement output."
-        );
-        finalized = sanitizePartialRegenOutput(result);
+      const parsedReplacement = parsePartialRegenPayload(result);
+      pushProcessStep("Structured replacement payload parsed successfully.", "info");
+      const finalizedResult = sanitizeGeneratedOutput(parsedReplacement.replacement);
+      if (finalizedResult.hadWrapper) {
+        pushProcessStep("Removed wrapper text from the replacement output.", "info");
       }
+      if (finalizedResult.hadReasoning && !loggedReasoningCleanup) {
+        loggedReasoningCleanup = true;
+        pushProcessStep("Removed reasoning text from the replacement output.", "info");
+      }
+      const finalized = finalizedResult.text;
 
-      if (!finalized) throw new Error("The model returned no usable replacement text.");
+      if (!finalized) {
+        pushProcessStep("Replacement output was empty after sanitization.", "error");
+        throw new Error("The model returned no usable replacement text.");
+      }
       const completedOutput = stitchReplacementIntoText(snapBefore, finalized, snapAfter);
       const completedInsertedText = completedOutput.slice(snapBefore.length, completedOutput.length - snapAfter.length);
       setOutputText(completedOutput);
       setPartialHighlight({ rawStart, rawEnd: rawStart + completedInsertedText.length, phase: "completed" });
       scheduleCompletedPartialHighlightFade();
+      const likelyHitTokenLimit = responseLikelyHitTokenCap(latestPartialUsage, partialMaxTokens);
+      setOutputLikelyHitTokenLimit(likelyHitTokenLimit);
+      if (likelyHitTokenLimit) {
+        pushProcessStep("Replacement may have hit the token limit and ended early.", "warning");
+      }
       pushProcessStep("Partial regeneration completed successfully.", "success", `${countWords(finalized)} words generated`);
       completeProcess("Partial regeneration completed successfully.");
     } catch (e) {
@@ -1501,7 +1641,12 @@ export default function App() {
       pushProcessStep("Validating profile and source text.");
       if (!(await ensureApiKeyReady("rewriting text"))) return;
       const confidence = activeProfileConfidence;
-      const filteredProfile = filterProfileForContext(activeProfile.profile, { toneLevel, formatPreset, mode, confidence });
+      const filteredProfile = filterProfileForContext(activeProfile.profile, {
+        toneLevel,
+        formatPreset,
+        mode,
+        confidence,
+      });
       const { message: filterMsg, detail: filterDetail } = describeProfileFilter(activeProfile.profile, filteredProfile);
       pushProcessStep(filterMsg, "info", filterDetail);
       const basePrompt = applyPromptDecorators(
@@ -1512,6 +1657,9 @@ export default function App() {
         : "";
       const baseSystemPrompt = [basePrompt, feedbackPrompt].filter(Boolean).join("\n\n");
       const humanizeOptions = { temperature: TEMP_BY_TONE[toneLevel] ?? 0.9, frequency_penalty: 0.15 };
+      const humanizeMaxTokens = computeMaxTokens(sourceText, "humanize");
+      let latestHumanizeUsage = null;
+      let loggedReasoningCleanup = false;
       const streamRewrite = async (systemPrompt, userPrompt, firstChunkMessage) => {
         startOutputStream();
         let loggedFirstChunk = false;
@@ -1529,16 +1677,22 @@ export default function App() {
                 loggedFirstChunk = true;
                 pushProcessStep(firstChunkMessage, "info");
               }
-              setOutputText(full);
-              setOutputBaseline(full);
+              const cleaned = sanitizeGeneratedOutput(full);
+              if (cleaned.hadReasoning && !loggedReasoningCleanup) {
+                loggedReasoningCleanup = true;
+                pushProcessStep("Removed reasoning text from the generated output.", "info");
+              }
+              setOutputText(cleaned.text);
+              setOutputBaseline(cleaned.text);
             },
-            computeMaxTokens(sourceText, "humanize"),
+            humanizeMaxTokens,
             selectedModel,
             { ...runtimeConfig, signal },
             {
               ...humanizeOptions,
               onUsage: (usage) => {
                 const normalized = normalizeUsage(usage);
+                latestHumanizeUsage = normalized;
                 setOutputUsage(normalized);
                 if (normalized?.promptTokens != null) {
                   setInputUsage({ sourceText, promptTokens: normalized.promptTokens });
@@ -1552,22 +1706,20 @@ export default function App() {
       };
 
       pushProcessStep("Preparing prompt and opening model stream.");
-      let out = await streamRewrite(
+      const result = await streamRewrite(
         baseSystemPrompt,
-        buildHumanizeUserPrompt(sourceText),
+        buildHumanizeUserPrompt(sourceText, {
+          tone: toneLevel,
+          oneOffInstruction,
+        }),
         "Model stream connected. Receiving rewrite output."
       );
-      if (outputLooksLikeAnsweredPrompt(sourceText, out)) {
-        pushProcessStep("Draft looked like a reply instead of a rewrite. Retrying with stricter guardrails.", "info");
-        out = await streamRewrite(
-          `${baseSystemPrompt}\n\nCritical constraint:\n- Rewrite the source text itself and never answer it as though you are in a live conversation.`,
-          buildHumanizeUserPrompt(sourceText, { strict: true }),
-          "Retry stream connected. Receiving guarded rewrite output."
-        );
-      }
+      pushProcessStep("Streaming finished. Applying final cleanup.", "info");
+      const cleaned = sanitizeGeneratedOutput(result);
+      const out = cleaned.text;
       if (!out.trim()) {
         if (!isActiveGeneration(generationId)) return;
-        pushProcessStep("Model stream ended with no output.", "error");
+        pushProcessStep("Generated output was empty after sanitization.", "error");
         const keyStatus = await getApiKeyStatus(runtimeConfig).catch(() => ({ hasKey: true }));
         if (keyStatus && !keyStatus.hasKey) {
           pushProcessStep("API key appears to be missing after empty response. Opening API key dialog.", "error");
@@ -1578,7 +1730,19 @@ export default function App() {
         throw new Error("The model returned an empty response.");
       }
       if (!isActiveGeneration(generationId)) return;
+      if (cleaned.hadWrapper) {
+        pushProcessStep("Removed wrapper text from the generated output.", "info");
+      }
+      if (cleaned.hadReasoning && !loggedReasoningCleanup) {
+        loggedReasoningCleanup = true;
+        pushProcessStep("Removed reasoning text from the generated output.", "info");
+      }
       commitOutput(out);
+      const likelyHitTokenLimit = responseLikelyHitTokenCap(latestHumanizeUsage, humanizeMaxTokens);
+      setOutputLikelyHitTokenLimit(likelyHitTokenLimit);
+      if (likelyHitTokenLimit) {
+        pushProcessStep("Rewrite may have hit the token limit and ended early.", "warning");
+      }
       pushProcessStep("Rewrite completed successfully.", "success", `${countWords(out)} words generated`);
       completeProcess("Rewrite completed successfully.");
       setStatus("");
@@ -1609,6 +1773,7 @@ export default function App() {
   // ── Elaborate ──
   async function elaborate({ regenerateFeedback = "" } = {}) {
     const sourceText = resolveSourceText();
+    const elaborateInput = analyzeElaborateInput(sourceText);
     const activeProfile = styles[activeProfileId];
     if (!activeProfile) { setError("Onboard your writing profile first."); return; }
     if (sourceText.trim().length < 10) { setError("Write something to elaborate on."); return; }
@@ -1619,13 +1784,33 @@ export default function App() {
       pushProcessStep("Validating profile and source text.");
       if (!(await ensureApiKeyReady("expanding text"))) return;
       const confidence = activeProfileConfidence;
-      const filteredProfile = filterProfileForContext(activeProfile.profile, { toneLevel, formatPreset, mode, confidence });
+      const filteredProfile = filterProfileForContext(activeProfile.profile, {
+        toneLevel: elaborateToneLevel,
+        formatPreset,
+        mode,
+        confidence,
+      });
       const { message: filterMsg, detail: filterDetail = "" } = describeProfileFilter(activeProfile.profile, filteredProfile);
       pushProcessStep(filterMsg, "info", filterDetail);
       startOutputStream();
       pushProcessStep("Preparing prompt and opening model stream.");
+      const elaborateMaxTokens = computeMaxTokens(sourceText, "elaborate", elabDepth);
+      let latestElaborateUsage = null;
       let loggedFirstChunk = false;
-      const basePrompt = applyPromptDecorators(ELABORATE_SYS(filteredProfile, toneLevel, elabDepth, activeProfile.name, activeProfile.meta));
+      let loggedReasoningCleanup = false;
+      const basePrompt = applyPromptDecorators(
+        ELABORATE_SYS(
+          filteredProfile,
+          elabDepth,
+          activeProfile.name,
+          activeProfile.meta,
+          {
+            formatPreset,
+            sourceHasMarkdown: elaborateInput.sourceHasMarkdown,
+          }
+        ),
+        { includePreset: false }
+      );
       const feedbackPrompt = regenerateFeedback.trim()
         ? `Regeneration feedback:\n- ${regenerateFeedback.trim()}\n- Keep the same source intent while applying this feedback.`
         : "";
@@ -1634,27 +1819,33 @@ export default function App() {
           pushProcessStep("Still waiting for the model to start streaming. OpenRouter may be queueing the request.", "warning");
         }
       }, STREAM_WAIT_NOTICE_MS);
-      const out = await (async () => {
+      const streamElaboration = async (systemPrompt, userPrompt, maxTokens, firstChunkMessage) => {
         try {
           return await llmStream(
-            [basePrompt, feedbackPrompt].filter(Boolean).join("\n\n"),
-            `Elaborate on:\n\n${sourceText}`,
+            systemPrompt,
+            userPrompt,
             (_, full) => {
               if (!loggedFirstChunk) {
                 loggedFirstChunk = true;
-                pushProcessStep("Model stream connected. Receiving expanded draft.", "info");
+                pushProcessStep(firstChunkMessage, "info");
               }
-              setOutputText(full);
-              setOutputBaseline(full);
+              const cleaned = sanitizeGeneratedOutput(full);
+              if (cleaned.hadReasoning && !loggedReasoningCleanup) {
+                loggedReasoningCleanup = true;
+                pushProcessStep("Removed reasoning text from the generated output.", "info");
+              }
+              setOutputText(cleaned.text);
+              setOutputBaseline(cleaned.text);
             },
-            computeMaxTokens(sourceText, "elaborate", elabDepth),
+            maxTokens,
             selectedModel,
             { ...runtimeConfig, signal },
             {
-              temperature: TEMP_BY_TONE[toneLevel] ?? 0.9,
+              temperature: TEMP_BY_TONE[elaborateToneLevel] ?? 0.9,
               frequency_penalty: 0.15,
               onUsage: (usage) => {
                 const normalized = normalizeUsage(usage);
+                latestElaborateUsage = normalized;
                 setOutputUsage(normalized);
                 if (normalized?.promptTokens != null) {
                   setInputUsage({ sourceText, promptTokens: normalized.promptTokens });
@@ -1665,10 +1856,26 @@ export default function App() {
         } finally {
           window.clearTimeout(waitNoticeId);
         }
-      })();
+      };
+      const baseSystemPrompt = [basePrompt, feedbackPrompt].filter(Boolean).join("\n\n");
+      const baseUserPrompt = buildElaborateUserPrompt(sourceText, {
+        sourceHasMarkdown: elaborateInput.sourceHasMarkdown,
+        depth: elabDepth,
+        tone: elaborateToneLevel,
+        oneOffInstruction,
+      });
+      const result = await streamElaboration(
+        baseSystemPrompt,
+        baseUserPrompt,
+        elaborateMaxTokens,
+        "Model stream connected. Receiving expanded draft."
+      );
+      pushProcessStep("Streaming finished. Applying final cleanup.", "info");
+      const cleaned = sanitizeGeneratedOutput(result);
+      const out = cleaned.text;
       if (!out.trim()) {
         if (!isActiveGeneration(generationId)) return;
-        pushProcessStep("Model stream ended with no output.", "error");
+        pushProcessStep("Generated output was empty after sanitization.", "error");
         const keyStatus = await getApiKeyStatus(runtimeConfig).catch(() => ({ hasKey: true }));
         if (keyStatus && !keyStatus.hasKey) {
           pushProcessStep("API key appears to be missing after empty response. Opening API key dialog.", "error");
@@ -1679,7 +1886,19 @@ export default function App() {
         throw new Error("The model returned an empty response.");
       }
       if (!isActiveGeneration(generationId)) return;
+      if (cleaned.hadWrapper) {
+        pushProcessStep("Removed wrapper text from the generated output.", "info");
+      }
+      if (cleaned.hadReasoning && !loggedReasoningCleanup) {
+        loggedReasoningCleanup = true;
+        pushProcessStep("Removed reasoning text from the generated output.", "info");
+      }
       commitOutput(out);
+      const likelyHitTokenLimit = responseLikelyHitTokenCap(latestElaborateUsage, elaborateMaxTokens);
+      setOutputLikelyHitTokenLimit(likelyHitTokenLimit);
+      if (likelyHitTokenLimit) {
+        pushProcessStep("Expansion may have hit the token limit and ended early.", "warning");
+      }
       pushProcessStep("Expansion completed successfully.", "success", `${countWords(out)} words generated`);
       completeProcess("Expansion completed successfully.");
       setStatus("");
@@ -1744,7 +1963,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode, inputText, styles, activeProfileId, toneLevel, stripCliches, cliches, selectedModel, elabDepth, oneOffInstruction, formatPreset, runtimeConfig]);
+  }, [mode, inputText, styles, activeProfileId, toneLevel, elaborateToneLevel, stripCliches, cliches, selectedModel, elabDepth, oneOffInstruction, formatPreset, runtimeConfig]);
 
   const hasCompletedOutput = outputPhase === "ready" && outputText.trim().length > 0;
   const isStreamingOutput = outputPhase === "streaming";
@@ -1820,8 +2039,8 @@ export default function App() {
                 hasStyle={hasProfile}
                 words={words}
                 cliches={cliches}
-                toneLevel={toneLevel}
-                onToneLevelChange={setToneLevel}
+                toneLevel={mode === "humanize" ? toneLevel : elaborateToneLevel}
+                onToneLevelChange={mode === "humanize" ? setToneLevel : setElaborateToneLevel}
                 stripCliches={stripCliches}
                 onStripClichesChange={setStripCliches}
                 elabDepth={elabDepth}
@@ -1848,6 +2067,7 @@ export default function App() {
                   outputWords={outputWords}
                   inputUsage={inputUsage}
                   outputUsage={outputUsage}
+                  outputLikelyHitTokenLimit={outputLikelyHitTokenLimit}
                   isStreaming={isStreamingOutput}
                   onOutputChange={handleOutputChange}
                   showDiff={showDiff}
@@ -1956,11 +2176,15 @@ export default function App() {
         clichesUpdatedAt={clichesUpdatedAt}
         generatedTerms={visibleAiTerms.generatedTerms}
         customTerms={visibleAiTerms.customTerms}
+        punctuationTerms={visibleAiTerms.punctuationTerms}
         hiddenTermsCount={aiTerms.hiddenTerms.length}
         onRefreshCliches={refreshCliches}
         onAddCustomTerm={addCustomCliche}
+        onAddPunctuationTerm={addPunctuationCliche}
         onRemoveCustomTerm={removeCustomCliche}
+        onRemovePunctuationTerm={removePunctuationCliche}
         onHideGeneratedTerm={hideGeneratedCliche}
+        onClearAllAiTerms={clearAllAiTerms}
         clicheFetching={clicheFetching}
         hasProfile={hasProfile}
         isCustomProfile={!!activeProfile?.isCustom}
@@ -2127,7 +2351,6 @@ export { extractStreamTextChunk } from './lib/api.js';
 export {
   analyzeHumanizeInput,
   buildHumanizeUserPrompt,
-  outputLooksLikeMetaPartialRegen,
   outputLooksLikeAnsweredPrompt,
   sanitizePartialRegenOutput,
 } from "./features/humanize/promptGuards.js";

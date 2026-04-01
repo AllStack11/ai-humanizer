@@ -56,6 +56,10 @@ function setStoredProfileData(styles, customModels = []) {
   localStorage.setItem("styles-v3", JSON.stringify({ styles, customModels }));
 }
 
+function buildStructuredStreamText(output, fieldName = "output") {
+  return JSON.stringify({ [fieldName]: output });
+}
+
 describe("Feature model routing", () => {
   let streamListener = null;
 
@@ -98,7 +102,9 @@ describe("Feature model routing", () => {
       if (command === "get_request_logs") return { logs: [] };
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        const fullText = "Hello world.";
+        const fullText = args.payload.model === "aion-labs/aion-2.0"
+          ? buildStructuredStreamText("Hello world.", "replacement")
+          : "Hello world.";
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -134,6 +140,21 @@ describe("Feature model routing", () => {
     const streamCalls = invokeMock.mock.calls.filter(([command]) => command === "openrouter_chat_stream");
     expect(streamCalls[0][1].payload.model).toBe("google/gemini-2.5-pro");
     expect(streamCalls[1][1].payload.model).toBe("aion-labs/aion-2.0");
+    expect(streamCalls[1][1].payload.response_format).toEqual({
+      type: "json_schema",
+      json_schema: {
+        name: "partial_regeneration",
+        strict: true,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            replacement: { type: "string" },
+          },
+          required: ["replacement"],
+        },
+      },
+    });
   });
 
   test("keeps standard output regeneration tied to the editor model", async () => {
@@ -209,7 +230,7 @@ describe("Feature model routing", () => {
     expect(pendingPartialRequestId).toBeTruthy();
   });
 
-  test("retries partial regen when the model returns rewrite scaffolding and commits only the replacement text", async () => {
+  test("commits partial regen output from the JSON replacement payload", async () => {
     let streamCallCount = 0;
 
     invokeMock.mockImplementation(async (command, args) => {
@@ -223,12 +244,7 @@ describe("Feature model routing", () => {
         const requestId = args.requestId;
         const fullText = streamCallCount === 1
           ? "Hello world."
-          : streamCallCount === 2
-            ? `Here are a few rewrite options:
-
-Option 1: First draft.
-Option 2: Second draft.`
-            : "Refined replacement";
+          : buildStructuredStreamText("Refined replacement.", "replacement");
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -255,19 +271,10 @@ Option 2: Second draft.`
       expect(screen.getByLabelText("mock-output-panel")).toHaveTextContent("Refined replacement.");
     });
 
-    expect(screen.queryByText(/Here are a few rewrite options/i)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Open logs drawer" }));
-    expect(await screen.findByRole("log", { name: "Process log" })).toHaveTextContent(
-      "Partial draft looked like scaffolding instead of a replacement. Retrying with stricter guardrails."
-    );
-    expect(screen.getByRole("log", { name: "Process log" })).toHaveTextContent(
-      "Retry stream connected. Receiving guarded replacement output."
-    );
-    expect(streamCallCount).toBe(3);
+    expect(streamCallCount).toBe(2);
   });
 
-  test("logs a failure and restores the original output when both partial regen attempts return unusable scaffolding", async () => {
+  test("logs a failure and restores the original output when partial regen returns invalid JSON", async () => {
     let streamCallCount = 0;
 
     invokeMock.mockImplementation(async (command, args) => {
@@ -281,10 +288,7 @@ Option 2: Second draft.`
         const requestId = args.requestId;
         const fullText = streamCallCount === 1
           ? "Hello world."
-          : `Here are a few rewrite options:
-
-Option 1: First draft.
-Option 2: Second draft.`;
+          : "Here are a few rewrite options:\n\nOption 1: First draft.";
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -311,10 +315,10 @@ Option 2: Second draft.`;
 
     await waitFor(() => {
       expect(within(screen.getByLabelText("mock-output-panel")).getByText("Hello world.")).toBeInTheDocument();
-      expect(processLog).toHaveTextContent("Partial regeneration failed. Model returned no output.");
-      expect(processLog).toHaveTextContent("The request completed but produced no usable text.");
-    }, { timeout: 6000 });
+      expect(processLog).toHaveTextContent("Partial regeneration failed. Provider response could not be parsed.");
+      expect(processLog).toHaveTextContent("The app received malformed or unexpected model output.");
+    });
 
-    expect(streamCallCount).toBe(3);
+    expect(streamCallCount).toBe(2);
   });
 });

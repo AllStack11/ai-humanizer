@@ -35,6 +35,29 @@ function setStoredProfileData(styles, customModels = []) {
   localStorage.setItem("styles-v3", JSON.stringify({ styles, customModels }));
 }
 
+function buildStructuredStreamText(output, fieldName = "output") {
+  return fieldName === "output" ? output : JSON.stringify({ [fieldName]: output });
+}
+
+function buildFinalizeResponse(args, fallback = "Hello world.") {
+  const userPrompt = args?.payload?.messages?.[0]?.content || "";
+  const draftMatch = userPrompt.match(/<draft_output>\n([\s\S]*?)\n<\/draft_output>/);
+  const rawDraft = (draftMatch?.[1] || fallback).trim();
+  const parsedDraft = (() => {
+    try {
+      const parsed = JSON.parse(rawDraft);
+      return typeof parsed?.output === "string" ? parsed.output : rawDraft;
+    } catch {
+      return rawDraft;
+    }
+  })();
+  const draft = parsedDraft
+    .replace(/^Here is the rewritten text:\s*/i, "")
+    .replace(/^Rewritten passage:\s*/i, "")
+    .trim();
+  return { content: [{ text: JSON.stringify({ output: draft }) }] };
+}
+
 const invokeMock = vi.fn();
 const listenMock = vi.fn();
 const clipboardWriteTextMock = vi.fn();
@@ -202,21 +225,24 @@ describe("App utility functions", () => {
     expect(normalized).toEqual({
       generatedTerms: ["delve", "robust"],
       customTerms: [],
+      punctuationTerms: [],
       hiddenTerms: [],
       updatedAt: "2026-03-31T10:00:00.000Z",
     });
   });
 
-  test("buildVisibleAiTerms hides removed generated terms and keeps custom terms separate", () => {
+  test("buildVisibleAiTerms hides removed generated terms and keeps custom and punctuation terms separate", () => {
     const visible = buildVisibleAiTerms({
-      generatedTerms: ["delve", "robust", "agentic slop"],
+      generatedTerms: ["delve", "robust", "agentic slop", "—"],
       customTerms: ["agentic slop", "must-keep"],
+      punctuationTerms: ["—", "..."],
       hiddenTerms: ["robust"],
     });
 
     expect(visible).toEqual({
       generatedTerms: ["delve"],
       customTerms: ["agentic slop", "must-keep"],
+      punctuationTerms: ["—", "..."],
     });
   });
 
@@ -224,6 +250,7 @@ describe("App utility functions", () => {
     const payload = buildAiTermsStoragePayload({
       generatedTerms: [" Delve ", "robust"],
       customTerms: ["Must-Keep", "must-keep"],
+      punctuationTerms: [" — ", "...", "..."],
       hiddenTerms: ["robust", ""],
       updatedAt: "2026-03-31T12:00:00.000Z",
     });
@@ -231,6 +258,7 @@ describe("App utility functions", () => {
     expect(payload).toEqual({
       generatedTerms: ["delve", "robust"],
       customTerms: ["must-keep"],
+      punctuationTerms: ["—", "..."],
       hiddenTerms: ["robust"],
       updatedAt: "2026-03-31T12:00:00.000Z",
     });
@@ -259,10 +287,13 @@ describe("App utility functions", () => {
 
   test("humanize prompt builder locks conversational inputs to transformation mode", () => {
     const analysis = analyzeHumanizeInput("Hey how are you doing today");
-    const prompt = buildHumanizeUserPrompt("Hey how are you doing today");
+    const prompt = buildHumanizeUserPrompt("Hey how are you doing today", { tone: 3 });
 
     expect(analysis.conversational).toBe(true);
     expect(analysis.questionLike).toBe(true);
+    expect(prompt).toMatch(/style instructions already provided/i);
+    expect(prompt).not.toMatch(/target voice/i);
+    expect(prompt).toMatch(/Tone target: "Professional"/i);
     expect(prompt).toMatch(/Do not answer it/i);
     expect(prompt).toMatch(/Keep the result as a question or check-in/i);
     expect(prompt).toMatch(/Keep the greeting intent/i);
@@ -300,6 +331,7 @@ describe("App UI", () => {
     localStorage.setItem("cliches-v3", JSON.stringify({
       generatedTerms: ["delve"],
       customTerms: [],
+      punctuationTerms: [],
       hiddenTerms: [],
       updatedAt: new Date().toISOString(),
     }));
@@ -323,12 +355,13 @@ describe("App UI", () => {
       if (command === "get_styles_backup") return { styles: {}, savedAt: null };
       if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
       if (command === "get_request_logs") return { logs: [] };
-      if (command === "openrouter_chat") return { content: [{ text: "Rewritten sentence." }] };
+      if (command === "openrouter_chat") return buildFinalizeResponse(args);
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        streamListener?.({ payload: { requestId, chunk: "Hello ", fullText: "Hello ", done: false, error: null } });
-        streamListener?.({ payload: { requestId, chunk: "world", fullText: "Hello world.", done: false, error: null } });
-        streamListener?.({ payload: { requestId, chunk: null, fullText: "Hello world.", done: true, error: null } });
+        const fullText = buildStructuredStreamText("Hello world.");
+        streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
       }
       return { ok: true };
@@ -348,12 +381,12 @@ describe("App UI", () => {
       if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
       if (command === "get_request_logs") return { logs: [] };
       if (command === "read_clipboard_text") return "Clipboard draft ready for humanizing.";
-      if (command === "openrouter_chat") return { content: [{ text: "Rewritten sentence." }] };
+      if (command === "openrouter_chat") return buildFinalizeResponse(args);
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        streamListener?.({ payload: { requestId, chunk: "Hello ", fullText: "Hello ", done: false, error: null } });
-        streamListener?.({ payload: { requestId, chunk: "world", fullText: "Hello world.", done: false, error: null } });
-        streamListener?.({ payload: { requestId, chunk: null, fullText: "Hello world.", done: true, error: null } });
+        const fullText = buildStructuredStreamText("Hello world.");
+        streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
       }
       return { ok: true };
@@ -433,8 +466,8 @@ describe("App UI", () => {
     });
     const streamCall = invokeMock.mock.calls.find(([command]) => command === "openrouter_chat_stream");
     expect(streamCall[1].payload.system).toMatch(/Extra constraints/);
-    expect(streamCall[1].payload.system).toMatch(/make this sound more confident/i);
     expect(streamCall[1].payload.system).toMatch(/blog post/i);
+    expect(streamCall[1].payload.messages[0].content).toMatch(/Extra instruction: make this sound more confident/i);
     expect(await screen.findByRole("region", { name: "LLM output" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Expand text metrics" }));
     expect(screen.getByText(/FKGL/)).toBeInTheDocument();
@@ -466,6 +499,12 @@ describe("App UI", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "One-off instruction" }), {
       target: { value: "add a concrete example at the end" },
     });
+    fireEvent.change(screen.getByRole("combobox", { name: "Output format preset" }), {
+      target: { value: "report" },
+    });
+    fireEvent.change(screen.getByRole("slider", { name: "Elaboration depth" }), {
+      target: { value: "4" },
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Elaborate text" }));
 
@@ -475,9 +514,199 @@ describe("App UI", () => {
     });
 
     const streamCall = invokeMock.mock.calls.find(([command]) => command === "openrouter_chat_stream");
-    expect(streamCall[1].payload.system).toMatch(/Extra constraints/);
-    expect(streamCall[1].payload.system).toMatch(/add a concrete example at the end/i);
+    expect(streamCall[1].payload.system).toMatch(/Preset requirement:/);
+    expect(streamCall[1].payload.system).toMatch(/Format as a report/i);
+    expect(streamCall[1].payload.system).toMatch(/Primary constraint: keep the elaboration deep but bounded/i);
+    expect(streamCall[1].payload.system).toMatch(/Stop rule: once the thought has been extended enough/i);
+    expect(streamCall[1].payload.system).not.toMatch(/add a concrete example at the end/i);
+    expect(streamCall[1].payload.messages[0].content).toContain("<source_text>");
+    expect(streamCall[1].payload.messages[0].content).toMatch(/Tone target: "Balanced"/i);
+    expect(streamCall[1].payload.messages[0].content).toMatch(/Depth target: 7.?10 sentences\./i);
+    expect(streamCall[1].payload.messages[0].content).toContain("Source format: plain_text.");
+    expect(streamCall[1].payload.messages[0].content).toMatch(/Extra instruction: add a concrete example at the end/i);
     expect(await screen.findByRole("region", { name: "LLM output" })).toBeInTheDocument();
+  });
+
+  test("elaborate mode uses its own tone slider for prompt and temperature", async () => {
+    setStoredProfileData({
+        personal: {
+          id: "personal",
+          name: "Personal",
+          profile: { tone: "balanced" },
+          sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
+          sampleCount: 1,
+          updatedAt: new Date().toISOString(),
+        },
+    });
+
+    renderWithMantine(<App />);
+    await screen.findByRole("button", { name: /add personal samples/i });
+
+    fireEvent.change(screen.getByRole("slider", { name: "Rewrite tone" }), {
+      target: { value: "0" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Switch to elaborate mode" }));
+    fireEvent.change(screen.getByRole("slider", { name: "Elaborate tone" }), {
+      target: { value: "4" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Write something to elaborate on…"), {
+      target: { value: "A concise draft that should expand in a more formal register." },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Elaborate text" }));
+
+    await waitFor(() => {
+      const streamCall = invokeMock.mock.calls.find(([command]) => command === "openrouter_chat_stream");
+      expect(streamCall).toBeTruthy();
+    });
+
+    const streamCall = invokeMock.mock.calls.find(([command]) => command === "openrouter_chat_stream");
+    expect(streamCall[1].payload.messages[0].content).toMatch(/Tone target: "Formal"/i);
+    expect(streamCall[1].payload.messages[0].content).not.toMatch(/Tone target: "Very Casual"/i);
+    expect(streamCall[1].payload.temperature).toBe(0.6);
+  });
+
+  test("keeps plain-text elaborate requests out of markdown mode for non-structured presets", async () => {
+    setStoredProfileData({
+        personal: {
+          id: "personal",
+          name: "Personal",
+          profile: { tone: "balanced" },
+          sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
+          sampleCount: 1,
+          updatedAt: new Date().toISOString(),
+        },
+    });
+
+    renderWithMantine(<App />);
+    await screen.findByRole("button", { name: /add personal samples/i });
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to elaborate mode" }));
+    fireEvent.change(screen.getByPlaceholderText("Write something to elaborate on…"), {
+      target: { value: "Plain text draft that should stay plain even when we elaborate it further." },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Output format preset" }), {
+      target: { value: "email" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Elaborate text" }));
+
+    await waitFor(() => {
+      const streamCall = invokeMock.mock.calls.find(([command]) => command === "openrouter_chat_stream");
+      expect(streamCall).toBeTruthy();
+    });
+
+    const streamCall = invokeMock.mock.calls.find(([command]) => command === "openrouter_chat_stream");
+    expect(streamCall[1].payload.system).toMatch(/Keep the output plain text as well/i);
+    expect(streamCall[1].payload.system).not.toMatch(/source already uses markdown/i);
+    expect(streamCall[1].payload.system).not.toMatch(/light preset-appropriate structure/i);
+    expect(streamCall[1].payload.messages[0].content).toContain("Source format: plain_text.");
+  });
+
+  test("preserves markdown guidance for markdown elaborate input", async () => {
+    setStoredProfileData({
+        personal: {
+          id: "personal",
+          name: "Personal",
+          profile: { tone: "balanced" },
+          sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
+          sampleCount: 1,
+          updatedAt: new Date().toISOString(),
+        },
+    });
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") return buildFinalizeResponse(args, "First sentence. Second sentence. Third sentence.");
+      if (command === "openrouter_chat_stream") {
+        const requestId = args.requestId;
+        const fullText = buildStructuredStreamText("First sentence. Second sentence. Third sentence.");
+        streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
+        return { ok: true };
+      }
+      return { ok: true };
+    });
+
+    renderWithMantine(<App />);
+    await screen.findByRole("button", { name: /add personal samples/i });
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to elaborate mode" }));
+    fireEvent.change(screen.getByPlaceholderText("Write something to elaborate on…"), {
+      target: { value: "# Draft heading\n\n- first point\n- second point" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Elaborate text" }));
+
+    await waitFor(() => {
+      const streamCall = invokeMock.mock.calls.find(([command]) => command === "openrouter_chat_stream");
+      expect(streamCall).toBeTruthy();
+    });
+
+    const streamCall = invokeMock.mock.calls.filter(([command]) => command === "openrouter_chat_stream").at(-1);
+    expect(streamCall[1].payload.system).toMatch(/source already uses markdown/i);
+    expect(streamCall[1].payload.system).toMatch(/Preserve that markdown style/i);
+    expect(streamCall[1].payload.messages[0].content).toContain("Source format: markdown.");
+  });
+
+  test("submits a single elaborate request for the selected very-short depth", async () => {
+    setStoredProfileData({
+        personal: {
+          id: "personal",
+          name: "Personal",
+          profile: { tone: "balanced" },
+          sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
+          sampleCount: 1,
+          updatedAt: new Date().toISOString(),
+        },
+    });
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") return buildFinalizeResponse(args, "First sentence. Second sentence. Third sentence.");
+      if (command === "openrouter_chat_stream") {
+        const requestId = args.requestId;
+        const fullText = buildStructuredStreamText("First sentence. Second sentence. Third sentence.");
+        streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
+        return { ok: true };
+      }
+      return { ok: true };
+    });
+
+    renderWithMantine(<App />);
+    await screen.findByRole("button", { name: /add personal samples/i });
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to elaborate mode" }));
+    fireEvent.change(screen.getByRole("slider", { name: "Elaboration depth" }), {
+      target: { value: "0" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("Write something to elaborate on…"), {
+      target: { value: "Keep this thought moving." },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Elaborate text" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "LLM output" })).toHaveTextContent("First sentence. Second sentence. Third sentence.");
+    });
+
+    const streamCalls = invokeMock.mock.calls.filter(([command]) => command === "openrouter_chat_stream");
+    expect(streamCalls).toHaveLength(1);
+    expect(streamCalls[0][1].payload.system).toMatch(/Primary constraint: keep the elaboration very short/i);
+    expect(streamCalls[0][1].payload.system).not.toMatch(/Depth target:/i);
+    expect(streamCalls[0][1].payload.system).toMatch(/brief follow-on detail or clarification/i);
+    expect(streamCalls[0][1].payload.system).toMatch(/Do not add setup, recap, transition sentences, conclusions, or extra examples/i);
+    expect(streamCalls[0][1].payload.messages[0].content).toMatch(/Tone target: "Balanced"/i);
+    expect(streamCalls[0][1].payload.messages[0].content).toMatch(/Depth target: 1.?2 short sentences\./i);
   });
 
   test.skip("stores one-off instructions in output history entries", async () => {
@@ -518,7 +747,7 @@ describe("App UI", () => {
     expect(entries[0].extraDirection).toMatch(/tighten the opening sentence/i);
   });
 
-  test("retries with stricter guardrails when a short conversational input gets answered", async () => {
+  test("keeps a single humanize request and strips wrapper text from the output", async () => {
     setStoredProfileData({
         personal: {
           id: "personal",
@@ -537,12 +766,15 @@ describe("App UI", () => {
       if (command === "get_styles_backup") return { styles: {}, savedAt: null };
       if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
       if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") return buildFinalizeResponse(args, "hey how are you doing today?");
       if (command === "openrouter_chat_stream") {
         streamCount += 1;
         const requestId = args.requestId;
-        const fullText = streamCount === 1
-          ? "you know im doing pretty good actually, been diving deep into some new agentic workflows lately"
-          : "hey how are you doing today?";
+        const fullText = buildStructuredStreamText(
+          streamCount === 1
+            ? "Here is the rewritten text:\nhey how are you doing today?"
+            : "hey how are you doing today?"
+        );
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -561,7 +793,7 @@ describe("App UI", () => {
 
     await waitFor(() => {
       const streamCalls = invokeMock.mock.calls.filter(([command]) => command === "openrouter_chat_stream");
-      expect(streamCalls).toHaveLength(2);
+      expect(streamCalls).toHaveLength(1);
     }, { timeout: 3000 });
 
     await waitFor(() => {
@@ -570,17 +802,72 @@ describe("App UI", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open logs drawer" }));
     expect(await screen.findByRole("log", { name: "Process log" })).toHaveTextContent(
-      "Draft looked like a reply instead of a rewrite. Retrying with stricter guardrails."
+      "Streaming finished. Applying final cleanup."
     );
     expect(screen.getByRole("log", { name: "Process log" })).toHaveTextContent(
-      "Retry stream connected. Receiving guarded rewrite output."
+      "Removed wrapper text from the generated output."
     );
 
     const streamCalls = invokeMock.mock.calls.filter(([command]) => command === "openrouter_chat_stream");
-    expect(streamCalls).toHaveLength(2);
+    expect(streamCalls).toHaveLength(1);
+    expect(streamCalls[0][1].payload.messages[0].content).toMatch(/Tone target: "Balanced"/i);
     expect(streamCalls[0][1].payload.messages[0].content).toMatch(/Do not answer it/i);
-    expect(streamCalls[1][1].payload.system).toMatch(/never answer it as though you are in a live conversation/i);
-    expect(streamCalls[1][1].payload.messages[0].content).toMatch(/previous attempt drifted into a response/i);
+    expect(invokeMock.mock.calls.some(([command]) => command === "openrouter_chat")).toBe(false);
+  });
+
+  test("strips leaked thinking blocks from streamed humanize output and logs the cleanup", async () => {
+    setStoredProfileData({
+        personal: {
+          id: "personal",
+          name: "Personal",
+          profile: { tone: "balanced" },
+          sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
+          sampleCount: 1,
+          updatedAt: new Date().toISOString(),
+        },
+    });
+
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") return buildFinalizeResponse(args, "hey how are you doing today?");
+      if (command === "openrouter_chat_stream") {
+        const requestId = args.requestId;
+        const fullText = `<thinking>
+Need to inspect the target voice first.
+</thinking>
+
+hey how are you doing today?`;
+        streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
+        return { ok: true };
+      }
+      return { ok: true };
+    });
+
+    renderWithMantine(<App />);
+    await screen.findByRole("button", { name: /add personal samples/i });
+
+    fireEvent.change(screen.getByPlaceholderText("Paste AI-generated text here…"), {
+      target: { value: "Hey how are you doing today" },
+    });
+
+    fireEvent.keyDown(window, { key: "Enter", metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "LLM output" })).toHaveTextContent("hey how are you doing today?");
+    }, { timeout: 3000 });
+
+    expect(screen.getByRole("region", { name: "LLM output" })).not.toHaveTextContent("Need to inspect the target voice first.");
+    expect(screen.getByRole("region", { name: "LLM output" })).not.toHaveTextContent("<thinking>");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open logs drawer" }));
+    expect(await screen.findByRole("log", { name: "Process log" })).toHaveTextContent(
+      "Removed reasoning text from the generated output."
+    );
   });
 
   test("shows active generation logs at the bottom of the output panel and hides them after streaming completes", async () => {
@@ -601,13 +888,12 @@ describe("App UI", () => {
       if (command === "get_styles_backup") return { styles: {}, savedAt: null };
       if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
       if (command === "get_request_logs") return { logs: [] };
-      if (command === "openrouter_chat") return { content: [{ text: "Rewritten sentence." }] };
+      if (command === "openrouter_chat") return buildFinalizeResponse(args);
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        streamListener?.({ payload: { requestId, chunk: "Hello ", fullText: "Hello ", done: false, error: null } });
-        await new Promise((resolve) => setTimeout(resolve, 40));
-        streamListener?.({ payload: { requestId, chunk: "world", fullText: "Hello world.", done: false, error: null } });
-        streamListener?.({ payload: { requestId, chunk: null, fullText: "Hello world.", done: true, error: null } });
+        const fullText = buildStructuredStreamText("Hello world.");
+        streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
       }
       return { ok: true };
@@ -657,15 +943,16 @@ describe("App UI", () => {
       if (command === "get_styles_backup") return { styles: {}, savedAt: null };
       if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
       if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") return buildFinalizeResponse(args, "Hello again");
       if (command === "openrouter_chat_stream") {
         streamCallCount += 1;
         if (streamCallCount === 1) {
           return new Promise(() => {});
         }
         const requestId = args.requestId;
-        streamListener?.({ payload: { requestId, chunk: "Hello ", fullText: "Hello ", done: false, error: null } });
-        streamListener?.({ payload: { requestId, chunk: "again", fullText: "Hello again", done: false, error: null } });
-        streamListener?.({ payload: { requestId, chunk: null, fullText: "Hello again", done: true, error: null } });
+        const fullText = buildStructuredStreamText("Hello again");
+        streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
       }
       return { ok: true };
@@ -775,7 +1062,7 @@ describe("App UI", () => {
       if (command === "openrouter_chat_stream") {
         streamCount += 1;
         const requestId = args.requestId;
-        const fullText = `History output ${streamCount}`;
+        const fullText = buildStructuredStreamText(`History output ${streamCount}`);
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -856,7 +1143,7 @@ describe("App UI", () => {
       if (command === "openrouter_chat_stream") {
         streamCount += 1;
         const requestId = args.requestId;
-        const fullText = `Regenerated output ${streamCount}`;
+        const fullText = buildStructuredStreamText(`Regenerated output ${streamCount}`);
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -914,7 +1201,7 @@ describe("App UI", () => {
       if (command === "openrouter_chat_stream") {
         streamCount += 1;
         const requestId = args.requestId;
-        const fullText = `Collapsible output ${streamCount}`;
+        const fullText = buildStructuredStreamText(`Collapsible output ${streamCount}`);
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -972,7 +1259,7 @@ describe("App UI", () => {
       if (command === "openrouter_chat_stream") {
         streamCount += 1;
         const requestId = args.requestId;
-        const fullText = `Feedback output ${streamCount}`;
+        const fullText = buildStructuredStreamText(`Feedback output ${streamCount}`);
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -1043,7 +1330,7 @@ describe("App UI", () => {
       if (command === "get_request_logs") return { logs: [] };
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        const fullText = "Shared preview expansion output that is long enough to wrap into multiple lines for the session history card.";
+        const fullText = buildStructuredStreamText("Shared preview expansion output that is long enough to wrap into multiple lines for the session history card.");
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -1105,7 +1392,7 @@ describe("App UI", () => {
       if (command === "get_request_logs") return { logs: [] };
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        const fullText = "Immutable history output";
+        const fullText = buildStructuredStreamText("Immutable history output");
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -1163,7 +1450,7 @@ describe("App UI", () => {
       if (command === "openrouter_chat_stream") {
         streamCount += 1;
         const requestId = args.requestId;
-        const fullText = `Session continuity output ${streamCount}`;
+        const fullText = buildStructuredStreamText(`Session continuity output ${streamCount}`);
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -1222,7 +1509,7 @@ describe("App UI", () => {
       if (command === "openrouter_chat_stream") {
         streamCount += 1;
         const requestId = args.requestId;
-        const fullText = `Mode switch continuity output ${streamCount}`;
+        const fullText = buildStructuredStreamText(`Mode switch continuity output ${streamCount}`);
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -1283,7 +1570,7 @@ describe("App UI", () => {
       if (command === "get_request_logs") return { logs: [] };
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        const fullText = "Single session output";
+        const fullText = buildStructuredStreamText("Single session output");
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -1327,9 +1614,12 @@ describe("App UI", () => {
       if (command === "get_styles_backup") return { styles: {}, savedAt: null };
       if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
       if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") {
+        return buildFinalizeResponse(args, "Persistent LLM output across mode switch");
+      }
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        const fullText = "Persistent LLM output across mode switch";
+        const fullText = buildStructuredStreamText("Persistent LLM output across mode switch");
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -1346,12 +1636,12 @@ describe("App UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Humanize text" }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Generated output editor")).toHaveTextContent("Persistent LLM output across mode switch");
+      expect(screen.getByRole("region", { name: "LLM output" })).toHaveTextContent("Persistent LLM output across mode switch");
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Switch to elaborate mode" }));
 
-    expect(screen.getByLabelText("Generated output editor")).toHaveTextContent("Persistent LLM output across mode switch");
+    expect(screen.getByRole("region", { name: "LLM output" })).toHaveTextContent("Persistent LLM output across mode switch");
   });
 
   test.skip("treats send after editing source text as a regeneration in the same session", async () => {
@@ -1376,7 +1666,7 @@ describe("App UI", () => {
       if (command === "openrouter_chat_stream") {
         streamCount += 1;
         const requestId = args.requestId;
-        const fullText = `Edited source regen output ${streamCount}`;
+        const fullText = buildStructuredStreamText(`Edited source regen output ${streamCount}`);
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -1434,7 +1724,7 @@ describe("App UI", () => {
       if (command === "openrouter_chat_stream") {
         streamCount += 1;
         const requestId = args.requestId;
-        const fullText = `New chat output ${streamCount}`;
+        const fullText = buildStructuredStreamText(`New chat output ${streamCount}`);
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -1492,7 +1782,7 @@ describe("App UI", () => {
       if (command === "get_request_logs") return { logs: [] };
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        const fullText = "Archive management output";
+        const fullText = buildStructuredStreamText("Archive management output");
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -1655,7 +1945,7 @@ describe("App UI", () => {
       if (command === "get_request_logs") return { logs: [] };
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        const fullText = "Unsaved archive result";
+        const fullText = buildStructuredStreamText("Unsaved archive result");
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -1706,7 +1996,7 @@ describe("App UI", () => {
       if (command === "get_request_logs") return { logs: [] };
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        const fullText = "Persisted across remount";
+        const fullText = buildStructuredStreamText("Persisted across remount");
         streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
         streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
@@ -2084,9 +2374,9 @@ describe("App UI", () => {
       }
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
-        streamListener?.({ payload: { requestId, chunk: "Hello ", fullText: "Hello ", done: false, error: null } });
-        streamListener?.({ payload: { requestId, chunk: "world", fullText: "Hello world.", done: false, error: null } });
-        streamListener?.({ payload: { requestId, chunk: null, fullText: "Hello world.", done: true, error: null } });
+        const fullText = buildStructuredStreamText("Hello world.");
+        streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
         return { ok: true };
       }
       return { ok: true };
@@ -2118,6 +2408,110 @@ describe("App UI", () => {
     const storedTerms = JSON.parse(localStorage.getItem("cliches-v3"));
     expect(storedTerms.customTerms).toContain("my custom phrase");
     expect(storedTerms.generatedTerms).toContain("fresh-term-1");
+  });
+
+  test("clears all AI terms from the settings drawer and resets stored AI term state", async () => {
+    localStorage.setItem("cliches-v3", JSON.stringify({
+      generatedTerms: ["delve", "robust"],
+      customTerms: ["must-keep"],
+      punctuationTerms: ["—"],
+      hiddenTerms: ["hidden-buzzword"],
+      updatedAt: "2026-03-31T12:00:00.000Z",
+    }));
+    localStorage.setItem("cliches-ts-v3", JSON.stringify("2026-03-31T12:00:00.000Z"));
+
+    renderWithMantine(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("4 active terms")).toBeInTheDocument();
+      expect(screen.getByText("1 generated term hidden locally")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear all AI terms" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("0 active terms")).toBeInTheDocument();
+      expect(screen.queryByText("1 generated term hidden locally")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "View AI terms" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("must-keep")).not.toBeInTheDocument();
+      expect(screen.queryByText("—")).not.toBeInTheDocument();
+      expect(screen.queryByText("delve")).not.toBeInTheDocument();
+      expect(screen.queryByText("robust")).not.toBeInTheDocument();
+      expect(screen.getByText("Custom terms (0)")).toBeInTheDocument();
+      expect(screen.getByText("Punctuation bans (0)")).toBeInTheDocument();
+      expect(screen.getByText("Generated terms (0)")).toBeInTheDocument();
+    });
+
+    const storedTerms = JSON.parse(localStorage.getItem("cliches-v3"));
+    expect(storedTerms).toEqual({
+      generatedTerms: [],
+      customTerms: [],
+      punctuationTerms: [],
+      hiddenTerms: [],
+      updatedAt: null,
+    });
+  });
+
+  test("adds punctuation bans from the AI terms modal and persists them", async () => {
+    renderWithMantine(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View AI terms" }));
+    await screen.findByText("Punctuation bans (0)");
+    fireEvent.change(screen.getByPlaceholderText("Add punctuation…"), {
+      target: { value: "—" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add punctuation" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("—")).toBeInTheDocument();
+    });
+
+    const storedTerms = JSON.parse(localStorage.getItem("cliches-v3"));
+    expect(storedTerms.punctuationTerms).toContain("—");
+  });
+
+  test("caps refreshed generated AI terms so the list does not keep growing", async () => {
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "has_api_key") return true;
+      if (command === "get_api_key_status") return { hasKey: true, source: "test" };
+      if (command === "get_styles_backup") return { styles: {}, savedAt: null };
+      if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
+      if (command === "get_request_logs") return { logs: [] };
+      if (command === "openrouter_chat") {
+        return {
+          content: [{
+            text: JSON.stringify(Array.from({ length: 95 }, (_, i) => `fresh-term-${i + 1}`)),
+          }],
+        };
+      }
+      if (command === "openrouter_chat_stream") {
+        const requestId = args.requestId;
+        const fullText = buildStructuredStreamText("Hello world.");
+        streamListener?.({ payload: { requestId, chunk: fullText, fullText, done: false, error: null } });
+        streamListener?.({ payload: { requestId, chunk: null, fullText, done: true, error: null } });
+        return { ok: true };
+      }
+      return { ok: true };
+    });
+
+    renderWithMantine(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh AI terms" }));
+
+    await waitFor(() => {
+      const storedTerms = JSON.parse(localStorage.getItem("cliches-v3"));
+      expect(storedTerms.generatedTerms).toHaveLength(60);
+      expect(storedTerms.generatedTerms[0]).toBe("fresh-term-1");
+      expect(storedTerms.generatedTerms[59]).toBe("fresh-term-60");
+    });
   });
 
   test("keyboard shortcut submits rewrite requests", async () => {

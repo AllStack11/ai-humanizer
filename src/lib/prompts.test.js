@@ -4,10 +4,13 @@ import {
   buildMetaBlock,
   renderProfileAsProse,
   selectCliches,
+  buildAiTermGuidance,
   ELABORATE_SYS,
   HUMANIZE_SYS,
   PARTIAL_REGEN_SYS,
   buildPartialRegenUserPrompt,
+  getElaborateFormatGuidance,
+  getElaboratePresetInstruction,
 } from "./prompts.js";
 
 // ─── buildMetaBlock ───────────────────────────────────────────────────────────
@@ -174,20 +177,22 @@ describe("HUMANIZE_SYS", () => {
     expect(prompt).toContain('"Work" profile');
   });
 
-  test("includes the tone label", () => {
+  test("keeps tone selection out of the system prompt", () => {
     const prompt = HUMANIZE_SYS(profile, 0, []); // Very Casual
-    expect(prompt).toMatch(/Very Casual/i);
+    expect(prompt).not.toMatch(/Tone target:/i);
   });
 
-  test("includes clichés as a hard constraint", () => {
+  test("renders generated terms as soft guidance", () => {
     const prompt = HUMANIZE_SYS(profile, 2, ["delve", "certainly"]);
     expect(prompt).toContain('"delve"');
     expect(prompt).toContain('"certainly"');
+    expect(prompt).toContain("Soft bans:");
+    expect(prompt).not.toContain("Hard bans:");
   });
 
   test("omits cliché constraint when list is empty", () => {
     const prompt = HUMANIZE_SYS(profile, 2, []);
-    expect(prompt).not.toContain("Hard constraint");
+    expect(prompt).not.toContain("AI-term avoidance policy:");
   });
 
   test("includes meta block when meta provided", () => {
@@ -206,6 +211,34 @@ describe("HUMANIZE_SYS", () => {
     const prompt = HUMANIZE_SYS(profile, 2, []);
     expect(prompt).toMatch(/speech act/i);
   });
+
+  test("keeps direct-text output instructions", () => {
+    const prompt = HUMANIZE_SYS(profile, 2, []);
+    expect(prompt).toMatch(/Output ONLY the rewritten text/i);
+    expect(prompt).not.toContain('{"output":"..."}');
+  });
+
+  test("renders custom terms as hard bans and adds a silent final pass", () => {
+    const prompt = HUMANIZE_SYS(profile, 2, {
+      generatedTerms: ["delve"],
+      customTerms: ["agentic slop"],
+    });
+
+    expect(prompt).toContain('Hard bans: Do not use these exact terms');
+    expect(prompt).toContain('"agentic slop"');
+    expect(prompt).toContain('Soft bans: Avoid these AI-sounding terms');
+    expect(prompt).toContain('Silent final pass: Before you answer');
+  });
+
+  test("calls out em dash as punctuation guidance", () => {
+    const prompt = HUMANIZE_SYS(profile, 2, {
+      generatedTerms: ["—", "delve"],
+      customTerms: [],
+    });
+
+    expect(prompt).toContain('Punctuation bans: Avoid these punctuation fingerprints');
+    expect(prompt).toContain('"—"');
+  });
 });
 
 // ─── ELABORATE_SYS ────────────────────────────────────────────────────────────
@@ -214,32 +247,93 @@ describe("ELABORATE_SYS", () => {
   const profile = { tone: "analytical", rhythm: "even measured cadence" };
 
   test("renders profile as prose bullets", () => {
-    const prompt = ELABORATE_SYS(profile, 2, 2);
+    const prompt = ELABORATE_SYS(profile, 2);
     expect(prompt).toContain("- Tone: analytical");
     expect(prompt).not.toContain('{"tone"');
   });
 
   test("includes depth instruction in the prompt", () => {
-    const promptBrief = ELABORATE_SYS(profile, 2, 1);
-    expect(promptBrief).toMatch(/2.+3 sentences/i);
-    const promptFull = ELABORATE_SYS(profile, 2, 4);
-    expect(promptFull).toMatch(/7.+10 sentences/i);
+    const promptBrief = ELABORATE_SYS(profile, 1);
+    expect(promptBrief).toMatch(/Primary constraint: keep the elaboration brief/i);
+    expect(promptBrief).not.toMatch(/Depth target:/i);
+    expect(promptBrief).toMatch(/Stop rule: once the thought has been extended enough/i);
+    const promptFull = ELABORATE_SYS(profile, 4);
+    expect(promptFull).toMatch(/Primary constraint: keep the elaboration deep but bounded/i);
+    expect(promptFull).not.toMatch(/Depth target:/i);
+    expect(promptFull).toMatch(/deep elaboration|layered specificity|examples/i);
   });
 
-  test("includes tone label", () => {
-    const prompt = ELABORATE_SYS(profile, 4, 2); // Formal
-    expect(prompt).toMatch(/Formal/i);
+  test("keeps the shortest depth very short without forcing exactly one sentence", () => {
+    const prompt = ELABORATE_SYS(profile, 0);
+    expect(prompt).toMatch(/Primary constraint: keep the elaboration very short/i);
+    expect(prompt).not.toMatch(/Depth target:/i);
+    expect(prompt).toMatch(/brief follow-on detail or clarification/i);
+    expect(prompt).toMatch(/Do not add setup, recap, transition sentences, conclusions, or extra examples/i);
   });
 
-  test("includes markdown formatting guidance", () => {
-    const prompt = ELABORATE_SYS(profile, 2, 2);
-    expect(prompt).toMatch(/Markdown is supported/i);
-    expect(prompt).toMatch(/Prefer clear structure/i);
+  test("keeps slider tone selection out of the elaborate system prompt", () => {
+    const prompt = ELABORATE_SYS(profile, 2);
+    expect(prompt).not.toContain('Tone target: "Formal"');
+    expect(prompt).not.toContain('Tone target: "Balanced"');
+  });
+
+  test("includes plain-text formatting guidance by default", () => {
+    const prompt = ELABORATE_SYS(profile, 2);
+    expect(prompt).toMatch(/source is plain text/i);
+    expect(prompt).toMatch(/Do not introduce markdown headings, bullets, numbered lists/i);
   });
 
   test("does not include cliché constraint", () => {
-    const prompt = ELABORATE_SYS(profile, 2, 2);
-    expect(prompt).not.toContain("Hard constraint");
+    const prompt = ELABORATE_SYS(profile, 2);
+    expect(prompt).not.toContain("AI-term avoidance policy:");
+  });
+
+  test("keeps direct-text output instructions", () => {
+    const prompt = ELABORATE_SYS(profile, 2);
+    expect(prompt).toMatch(/Output ONLY the elaboration/i);
+    expect(prompt).not.toContain('{"output":"..."}');
+  });
+
+  test("includes dedicated preset guidance when a preset is active", () => {
+    const prompt = ELABORATE_SYS(profile, 2, "Personal", null, { formatPreset: "report" });
+    expect(prompt).toContain("Preset requirement:");
+    expect(prompt).toMatch(/Format as a report/i);
+  });
+
+  test("allows markdown preservation when the source already uses markdown", () => {
+    const prompt = ELABORATE_SYS(profile, 2, "Personal", null, {
+      formatPreset: "none",
+      sourceHasMarkdown: true,
+    });
+    expect(prompt).toMatch(/source already uses markdown/i);
+    expect(prompt).toMatch(/Preserve that markdown style/i);
+  });
+
+  test("keeps plain-text presets out of markdown-friendly guidance", () => {
+    const prompt = ELABORATE_SYS(profile, 2, "Personal", null, { formatPreset: "email" });
+    expect(prompt).toMatch(/Keep the output plain text as well/i);
+    expect(prompt).not.toMatch(/you may use light preset-appropriate structure/i);
+  });
+});
+
+describe("elaborate prompt helpers", () => {
+  test("returns preset instructions for known presets", () => {
+    expect(getElaboratePresetInstruction("blog-post")).toMatch(/blog post/i);
+    expect(getElaboratePresetInstruction("none")).toBe("");
+  });
+
+  test("allows limited structure for blog-post and report plain-text inputs", () => {
+    expect(getElaborateFormatGuidance({ formatPreset: "blog-post", sourceHasMarkdown: false })).toMatch(/light preset-appropriate structure/i);
+    expect(getElaborateFormatGuidance({ formatPreset: "report", sourceHasMarkdown: false })).toMatch(/light preset-appropriate structure/i);
+  });
+
+  test("suppresses markdown for email and twitter plain-text inputs", () => {
+    expect(getElaborateFormatGuidance({ formatPreset: "email", sourceHasMarkdown: false })).toMatch(/plain text as well/i);
+    expect(getElaborateFormatGuidance({ formatPreset: "twitter-post", sourceHasMarkdown: false })).toMatch(/plain text as well/i);
+  });
+
+  test("preserves markdown guidance when the source contains markdown", () => {
+    expect(getElaborateFormatGuidance({ formatPreset: "report", sourceHasMarkdown: true })).toMatch(/source already uses markdown/i);
   });
 });
 
@@ -261,10 +355,16 @@ describe("PARTIAL_REGEN_SYS", () => {
   });
 
   test("includes cliché constraint when list is non-empty", () => {
-    const prompt = PARTIAL_REGEN_SYS(profile, 1, ["delve", "leverage"]);
+    const prompt = PARTIAL_REGEN_SYS(profile, 1, {
+      generatedTerms: ["delve", "leverage"],
+      customTerms: ["agentic slop"],
+    });
     expect(prompt).toContain('"delve"');
     expect(prompt).toContain('"leverage"');
-    expect(prompt).toContain("Hard constraint");
+    expect(prompt).toContain('"agentic slop"');
+    expect(prompt).toContain("AI-term avoidance policy:");
+    expect(prompt).toContain("Hard bans:");
+    expect(prompt).toContain("Soft bans:");
   });
 
   test("output length rule is present", () => {
@@ -274,9 +374,50 @@ describe("PARTIAL_REGEN_SYS", () => {
 
   test("forbids options and scaffolding in the output", () => {
     const prompt = PARTIAL_REGEN_SYS(profile, 1, []);
+    expect(prompt).toMatch(/\{"replacement":"\.\.\."\}/i);
     expect(prompt).toMatch(/multiple options/i);
     expect(prompt).toMatch(/follow-up questions/i);
-    expect(prompt).toMatch(/markdown fences/i);
+    expect(prompt).toMatch(/Here is the rewritten text:/i);
+    expect(prompt).toMatch(/JSON object/i);
+  });
+
+  test("includes the same silent final pass guidance as humanize", () => {
+    const prompt = PARTIAL_REGEN_SYS(profile, 1, {
+      generatedTerms: ["—", "delve"],
+      customTerms: ["agentic slop"],
+    });
+
+    expect(prompt).toContain('Silent final pass: Before you answer');
+    expect(prompt).toContain('Punctuation bans:');
+    expect(prompt).toContain('"—"');
+  });
+});
+
+describe("buildAiTermGuidance", () => {
+  test("splits custom hard bans from generated soft bans", () => {
+    const guidance = buildAiTermGuidance({
+      generatedTerms: ["delve", "robust"],
+      customTerms: ["agentic slop"],
+    });
+
+    expect(guidance).toContain("AI-term avoidance policy:");
+    expect(guidance).toContain('Hard bans: Do not use these exact terms');
+    expect(guidance).toContain('"agentic slop"');
+    expect(guidance).toContain('Soft bans: Avoid these AI-sounding terms');
+    expect(guidance).toContain('"delve"');
+    expect(guidance).toContain('"robust"');
+  });
+
+  test("treats punctuation-only terms separately", () => {
+    const guidance = buildAiTermGuidance({
+      generatedTerms: ["—"],
+      customTerms: ["..."],
+    });
+
+    expect(guidance).toContain('Punctuation bans: Do not use these punctuation patterns');
+    expect(guidance).toContain('Punctuation bans: Avoid these punctuation fingerprints');
+    expect(guidance).toContain('"—"');
+    expect(guidance).toContain('"..."');
   });
 });
 
@@ -293,9 +434,14 @@ describe("buildPartialRegenUserPrompt", () => {
     expect(prompt).toContain("<regen_target>\nselected part\n</regen_target>");
   });
 
-  test("adds stricter retry instructions when requested", () => {
-    const prompt = buildPartialRegenUserPrompt("full document", "selected part", { strict: true });
-    expect(prompt).toContain("previous attempt included scaffolding");
+  test("does not add retry-only instructions", () => {
+    const prompt = buildPartialRegenUserPrompt("full document", "selected part");
+    expect(prompt).not.toContain("previous attempt included scaffolding");
+  });
+
+  test("includes the exact JSON response shape", () => {
+    const prompt = buildPartialRegenUserPrompt("full document", "selected part");
+    expect(prompt).toContain('{"replacement":"rewritten passage here"}');
   });
 });
 
@@ -326,7 +472,6 @@ describe("cliché prioritization in generated prompts", () => {
     expect(delvePos).toBeGreaterThan(-1);
     expect(customPos).toBeGreaterThan(-1);
     expect(conclusionPos).toBeGreaterThan(-1);
-    expect(delvePos).toBeLessThan(customPos);
     expect(customPos).toBeLessThan(conclusionPos);
   });
 });

@@ -4,13 +4,11 @@ import { Button, Input } from "./AppUI.jsx";
 
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 
-export function isTextOnlyCatalogModel(model) {
+export function isNonImageOnlyCatalogModel(model) {
   const inputModalities = model?.architecture?.input_modalities;
-  const outputModalities = model?.architecture?.output_modalities;
 
   if (!Array.isArray(inputModalities) || inputModalities.length === 0) return false;
-  if (!inputModalities.every((modality) => modality === "text")) return false;
-  if (Array.isArray(outputModalities) && !outputModalities.includes("text")) return false;
+  if (inputModalities.every((modality) => modality === "image")) return false;
 
   return true;
 }
@@ -52,7 +50,7 @@ export default function AddModelModal({ opened, onClose, onAdd, apiKey }) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       const list = (json.data || [])
-        .filter(isTextOnlyCatalogModel)
+        .filter(isNonImageOnlyCatalogModel)
         .sort((a, b) =>
         (a.name || a.id).localeCompare(b.name || b.id)
       );

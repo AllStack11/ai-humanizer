@@ -195,6 +195,20 @@ export function classifyRequestIssue(message) {
     };
   }
 
+  if (
+    normalized.includes("invalid json format") ||
+    normalized.includes("valid json object or array") ||
+    normalized.includes("starting '{' or '[' found")
+  ) {
+    return {
+      kind: "parse",
+      status: "error",
+      summary: "Provider response could not be parsed.",
+      detail: "The app received malformed or unexpected model output.",
+      userMessage: "The provider returned malformed or unexpected output.",
+    };
+  }
+
   if (normalized.includes("invalid profile structure")) {
     return {
       kind: "invalid_profile_structure",
@@ -297,6 +311,24 @@ export function isPlainObject(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+export function parsePartialRegenPayload(raw) {
+  return parseStructuredTextPayload(raw, "replacement", "partial regeneration");
+}
+
+export function parseStructuredTextPayload(raw, fieldName = "output", label = "generation") {
+  const parsed = parseJsonFromModelOutput(raw);
+  if (!isPlainObject(parsed)) {
+    throw new Error(`Model returned invalid ${label} payload.`);
+  }
+
+  const value = typeof parsed[fieldName] === "string" ? parsed[fieldName].trim() : "";
+  if (!value) {
+    throw new Error("The model returned no usable replacement text.");
+  }
+
+  return { [fieldName]: value };
 }
 
 export function normalizeProfileObject(rawProfile) {

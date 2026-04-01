@@ -25,7 +25,7 @@ describe("AddModelModal", () => {
     vi.unstubAllGlobals();
   });
 
-  test("shows only text-only catalog models from OpenRouter", async () => {
+  test("shows all catalog models except image-only entries from OpenRouter", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -61,6 +61,14 @@ describe("AddModelModal", () => {
               output_modalities: ["audio"],
             },
           },
+          {
+            id: "vision/image-only-model",
+            name: "Image Only",
+            architecture: {
+              input_modalities: ["image"],
+              output_modalities: ["text"],
+            },
+          },
         ],
       }),
     });
@@ -71,13 +79,19 @@ describe("AddModelModal", () => {
 
     expect(await screen.findByText("Alpha Plain")).toBeInTheDocument();
     expect(screen.getByText("Zeta Text")).toBeInTheDocument();
-    expect(screen.queryByText("Vision Mixed")).not.toBeInTheDocument();
-    expect(screen.queryByText("Audio Output")).not.toBeInTheDocument();
+    expect(screen.getByText("Vision Mixed")).toBeInTheDocument();
+    expect(screen.getByText("Audio Output")).toBeInTheDocument();
+    expect(screen.queryByText("Image Only")).not.toBeInTheDocument();
 
     const visibleNames = screen
-      .getAllByText(/Alpha Plain|Zeta Text/)
+      .getAllByText(/Alpha Plain|Audio Output|Vision Mixed|Zeta Text/)
       .map((node) => node.textContent);
-    expect(visibleNames).toEqual(["Alpha Plain", "Zeta Text"]);
+    expect(visibleNames).toEqual([
+      "Alpha Plain",
+      "Audio Output",
+      "Vision Mixed",
+      "Zeta Text",
+    ]);
   });
 
   test("hides models with missing modality metadata instead of guessing", async () => {
@@ -117,17 +131,17 @@ describe("AddModelModal", () => {
     expect(screen.queryByText("Missing Input")).not.toBeInTheDocument();
   });
 
-  test("still allows manual model entry even when a model would be excluded from the catalog", async () => {
+  test("still allows manual model entry even when an image-only model is excluded from the catalog", async () => {
     const onAdd = vi.fn();
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({
         data: [
           {
-            id: "vision/filtered-model",
-            name: "Filtered Vision",
+            id: "vision/image-only-model",
+            name: "Image Only",
             architecture: {
-              input_modalities: ["text", "image"],
+              input_modalities: ["image"],
               output_modalities: ["text"],
             },
           },
@@ -143,20 +157,20 @@ describe("AddModelModal", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    expect(screen.queryByText("Filtered Vision")).not.toBeInTheDocument();
+    expect(screen.queryByText("Image Only")).not.toBeInTheDocument();
     expect(screen.getByText("No models match your search.")).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("Model ID (e.g. openai/gpt-4o-mini)"), {
-      target: { value: "vision/filtered-model" },
+      target: { value: "vision/image-only-model" },
     });
     fireEvent.change(screen.getByPlaceholderText("Display name (optional)"), {
-      target: { value: "Manual Vision Model" },
+      target: { value: "Manual Image Model" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add Model" }));
 
     expect(onAdd).toHaveBeenCalledWith({
-      value: "vision/filtered-model",
-      label: "Manual Vision Model",
+      value: "vision/image-only-model",
+      label: "Manual Image Model",
     });
   });
 });

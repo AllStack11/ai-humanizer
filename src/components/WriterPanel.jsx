@@ -432,13 +432,13 @@ export default function WriterPanel({
                   />
                 </ToolbarScale>
               ) : null}
-              {mode === "humanize" ? (
+              {(mode === "humanize" || mode === "elaborate") ? (
                 <ToolbarScale label="Tone">
                   <ToolbarRangeControl
                     value={toneLevel}
                     onChange={onToneLevelChange}
                     options={TONE_LEVELS}
-                    ariaLabel="Rewrite tone"
+                    ariaLabel={mode === "humanize" ? "Rewrite tone" : "Elaborate tone"}
                   />
                 </ToolbarScale>
               ) : null}
