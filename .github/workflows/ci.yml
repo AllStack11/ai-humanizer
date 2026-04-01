@@ -1,6 +1,9 @@
 # Standard CI Workflow for Testing and Building
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
