@@ -101,7 +101,7 @@ describe("Feature model UI and persistence", () => {
       if (command === "get_styles_backup") return { styles: {}, savedAt: null };
       if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
       if (command === "get_request_logs") return { logs: [] };
-      if (command === "openrouter_chat") return { content: [{ text: "{\"tone\":\"balanced\"}" }] };
+      if (command === "openrouter_chat") return { content: [{ text: "{\"vocabulary\":\"plain and direct\"}" }] };
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
         streamListener?.({ payload: { requestId, chunk: "Hello ", fullText: "Hello ", done: false, error: null } });
@@ -140,7 +140,7 @@ describe("Feature model UI and persistence", () => {
       personal: {
         id: "personal",
         name: "Personal",
-        profile: { tone: "balanced" },
+        profile: { vocabulary: "plain and direct" },
         sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
         sampleCount: 1,
         updatedAt: new Date().toISOString(),
@@ -201,7 +201,7 @@ describe("Feature model UI and persistence", () => {
       if (command === "openrouter_chat") {
         profileAttempt += 1;
         if (profileAttempt === 1) throw new Error("Failed to reach OpenRouter: connection refused");
-        return { content: [{ text: '{"tone":"balanced"}' }] };
+        return { content: [{ text: '{"vocabulary":"plain and direct"}' }] };
       }
       if (command === "openrouter_chat_stream") return { ok: true };
       return { ok: true };
@@ -213,7 +213,7 @@ describe("Feature model UI and persistence", () => {
     );
 
     await waitFor(() => {
-      expect(getFirstStoredProfileRecord()?.profile?.tone).toBe("balanced");
+      expect(getFirstStoredProfileRecord()?.profile?.vocabulary).toBe("plain and direct");
       expect(Object.keys(getFirstStoredProfileRecord()?.profile || {}).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
     }, { timeout: 9000 });
 
@@ -228,7 +228,7 @@ describe("Feature model UI and persistence", () => {
       if (command === "get_styles_backup") return { styles: {}, savedAt: null };
       if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
       if (command === "get_request_logs") return { logs: [] };
-      if (command === "openrouter_chat") return { content: [{ text: '["tone","balanced"]' }] };
+      if (command === "openrouter_chat") return { content: [{ text: '["vocabulary","plain and direct"]' }] };
       if (command === "openrouter_chat_stream") return { ok: true };
       return { ok: true };
     });
@@ -273,7 +273,7 @@ describe("Feature model UI and persistence", () => {
       if (command === "openrouter_chat") {
         return {
           content: [{
-            text: '{"tone":"balanced","summary":"steady and direct","sampleCount":3,"nested":{"bad":true},"humor":"dry"}',
+            text: '{"tone":"balanced","formality":"casually formal","sampleCount":3,"nested":{"bad":true},"humor":"dry"}',
           }],
         };
       }
@@ -288,10 +288,11 @@ describe("Feature model UI and persistence", () => {
 
     await waitFor(() => {
       const profile = getFirstStoredProfileRecord()?.profile;
-      expect(profile?.tone).toBe("balanced");
       expect(profile?.humor).toBe("dry");
       expect(profile?.vocabulary).toBe("");
       expect(profile?.summary).toBeUndefined();
+      expect(profile).not.toHaveProperty("tone");
+      expect(profile).not.toHaveProperty("formality");
       expect(Object.keys(profile || {}).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
     }, { timeout: 9000 });
   });
@@ -303,7 +304,7 @@ describe("Feature model UI and persistence", () => {
     );
 
     await waitFor(() => {
-      expect(getFirstStoredProfileRecord()?.profile?.tone).toBe("balanced");
+      expect(getFirstStoredProfileRecord()?.profile?.vocabulary).toBe("plain and direct");
       expect(Object.keys(getFirstStoredProfileRecord()?.profile || {}).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
       expect(getFirstStoredProfileRecord()?.sampleCount).toBe(1);
     }, { timeout: 9000 });
@@ -331,7 +332,7 @@ describe("Feature model UI and persistence", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "Profile" })).toHaveValue("client-voice");
-      expect(getStoredProfileRecord("client-voice")?.profile?.tone).toBe("balanced");
+      expect(getStoredProfileRecord("client-voice")?.profile?.vocabulary).toBe("plain and direct");
       expect(Object.keys(getStoredProfileRecord("client-voice")?.profile || {}).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
       expect(getStoredProfileRecord("client-voice")?.sampleCount).toBe(1);
     }, { timeout: 9000 });
@@ -342,7 +343,7 @@ describe("Feature model UI and persistence", () => {
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "Profile" })).toHaveValue("client-voice");
       expect(getStoredProfileRecord("client-voice")?.name).toBe("Client Voice");
-      expect(getStoredProfileRecord("client-voice")?.profile?.tone).toBe("balanced");
+      expect(getStoredProfileRecord("client-voice")?.profile?.vocabulary).toBe("plain and direct");
       expect(Object.keys(getStoredProfileRecord("client-voice")?.profile || {}).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
     }, { timeout: 9000 });
   }, 15000);
@@ -353,7 +354,7 @@ describe("Feature model UI and persistence", () => {
         id: "personal",
         name: "Personal",
         isCustom: false,
-        profile: { tone: "warm" },
+        profile: { vocabulary: "warm" },
         sampleEntries: [{ id: 1, text: "This is a long enough built in sample to count as trained profile content.", type: "general" }],
         sampleCount: 1,
         updatedAt: new Date().toISOString(),
@@ -378,7 +379,7 @@ describe("Feature model UI and persistence", () => {
         id: "client-voice",
         name: "Client Voice",
         isCustom: true,
-        profile: { tone: "direct" },
+        profile: { vocabulary: "direct" },
         sampleEntries: [{ id: 1, text: "This is a long enough custom sample to count as trained profile content too.", type: "general" }],
         sampleCount: 1,
         updatedAt: new Date().toISOString(),
@@ -427,7 +428,7 @@ describe("Feature model UI and persistence", () => {
         id: "personal",
         name: "Personal",
         isCustom: false,
-        profile: { tone: "warm", humor: "playful", rhythm: "bouncy" },
+        profile: { vocabulary: "warm", humor: "playful", rhythm: "bouncy" },
         sampleEntries: [
           {
             id: 1,
@@ -446,7 +447,7 @@ describe("Feature model UI and persistence", () => {
       if (command === "get_styles_backup") return { styles: {}, savedAt: null };
       if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
       if (command === "get_request_logs") return { logs: [] };
-      if (command === "openrouter_chat") return { content: [{ text: "{\"tone\":\"direct\"}" }] };
+      if (command === "openrouter_chat") return { content: [{ text: "{\"vocabulary\":\"direct\"}" }] };
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
         streamListener?.({ payload: { requestId, chunk: "Hello ", fullText: "Hello ", done: false, error: null } });
@@ -470,7 +471,7 @@ describe("Feature model UI and persistence", () => {
       const profile = getStoredProfileRecord("personal")?.profile;
       expect(profile).toBeTruthy();
       expect(Object.keys(profile).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
-      expect(profile.tone).toBe("direct");
+      expect(profile.vocabulary).toBe("direct");
       expect(profile.humor).toBe("");
       expect(profile.rhythm).toBe("");
     }, { timeout: 9000 });
@@ -544,7 +545,7 @@ describe("Feature model UI and persistence", () => {
       }
       if (command === "save_styles_backup") return { ok: true, savedAt: new Date().toISOString() };
       if (command === "get_request_logs") return { logs: [] };
-      if (command === "openrouter_chat") return { content: [{ text: "{\"tone\":\"balanced\"}" }] };
+      if (command === "openrouter_chat") return { content: [{ text: "{\"vocabulary\":\"plain and direct\"}" }] };
       if (command === "openrouter_chat_stream") {
         const requestId = args.requestId;
         streamListener?.({ payload: { requestId, chunk: "Hello ", fullText: "Hello ", done: false, error: null } });

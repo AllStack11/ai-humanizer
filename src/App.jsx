@@ -239,7 +239,6 @@ export default function App() {
   const [isPartialStreaming, setIsPartialStreaming] = useState(false);
   const [partialRegenText, setPartialRegenText] = useState("");
   const [partialHighlight, setPartialHighlight] = useState(null);
-  const [showDiff, setShowDiff] = useState(false);
   const [outputPhase, setOutputPhase] = useState("idle");
   const [toneLevel, setToneLevel]   = useState(2);
   const [elaborateToneLevel, setElaborateToneLevel] = useState(2);
@@ -1367,7 +1366,6 @@ export default function App() {
     setOutputUsage(null);
     setOutputLikelyHitTokenLimit(false);
     setOutputCopied(false);
-    setShowDiff(true);
     setOutputPhase("idle");
   }
 
@@ -1378,7 +1376,6 @@ export default function App() {
     setOutputUsage(null);
     setOutputLikelyHitTokenLimit(false);
     setOutputCopied(false);
-    setShowDiff(true);
     setOutputPhase("streaming");
   }
 
@@ -1388,7 +1385,6 @@ export default function App() {
     setOutputText(normalized);
     setOutputBaseline(normalized);
     setOutputCopied(false);
-    setShowDiff(true);
     setOutputPhase("ready");
   }
 
@@ -2070,8 +2066,6 @@ export default function App() {
                   outputLikelyHitTokenLimit={outputLikelyHitTokenLimit}
                   isStreaming={isStreamingOutput}
                   onOutputChange={handleOutputChange}
-                  showDiff={showDiff}
-                  onToggleDiff={() => setShowDiff((prev) => !prev)}
                   isEdited={outputEdited}
                   readabilityBefore={readabilityBefore}
                   readabilityAfter={readabilityAfter}
@@ -2330,6 +2324,7 @@ export default function App() {
 // ─── Re-exports for test compatibility ────────────────────────────────────────
 export {
   buildClicheRanges,
+  buildDiffHighlightRanges,
   buildDiffSegments,
   buildMirrorSegments,
   collectCoverageGaps,

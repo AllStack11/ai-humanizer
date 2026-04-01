@@ -27,6 +27,8 @@ function findMatches(doc, getRanges) {
       const cls = range.class ?? (
         range.kind === "error" ? "mark-error" :
         range.kind === "cliche" ? "mark-cliche" :
+        range.kind === "diff-added" ? "mark-diff-added" :
+        range.kind === "diff-removed" ? "mark-diff-removed" :
         null
       );
       if (!cls) return;

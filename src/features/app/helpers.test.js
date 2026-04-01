@@ -63,34 +63,35 @@ describe("parseJsonFromModelOutput", () => {
   });
 
   it("handles the specific case from the task error (Unexpected token '#')", () => {
-    const input = '# Voice Profile Analysis\n\n```json\n{"tone": "formal"}\n```';
-    expect(parseJsonFromModelOutput(input)).toEqual({ tone: "formal" });
+    const input = '# Voice Profile Analysis\n\n```json\n{"humor": "dry"}\n```';
+    expect(parseJsonFromModelOutput(input)).toEqual({ humor: "dry" });
   });
 });
 
 describe("profile object validation", () => {
   it("identifies plain objects", () => {
-    expect(isPlainObject({ tone: "balanced" })).toBe(true);
+    expect(isPlainObject({ humor: "dry" })).toBe(true);
     expect(isPlainObject(Object.create(null))).toBe(true);
     expect(isPlainObject(null)).toBe(false);
-    expect(isPlainObject(["tone"])).toBe(false);
-    expect(isPlainObject("tone")).toBe(false);
+    expect(isPlainObject(["humor"])).toBe(false);
+    expect(isPlainObject("humor")).toBe(false);
   });
 
   it("rejects non-object profile payloads", () => {
     expect(() => normalizeProfileObject(null)).toThrow("Model returned invalid profile structure.");
-    expect(() => normalizeProfileObject(["tone"])).toThrow("Model returned invalid profile structure.");
-    expect(() => normalizeProfileObject("tone")).toThrow("Model returned invalid profile structure.");
+    expect(() => normalizeProfileObject(["humor"])).toThrow("Model returned invalid profile structure.");
+    expect(() => normalizeProfileObject("humor")).toThrow("Model returned invalid profile structure.");
   });
 
   it("rejects empty profile objects", () => {
     expect(() => normalizeProfileObject({})).toThrow("Model returned invalid profile structure.");
-    expect(() => normalizeProfileObject({ tone: "", summary: "   " })).toThrow("Model returned invalid profile structure.");
+    expect(() => normalizeProfileObject({ humor: "", summary: "   " })).toThrow("Model returned invalid profile structure.");
   });
 
-  it("keeps only trimmed string fields", () => {
+  it("keeps only trimmed supported string fields and drops removed traits", () => {
     const normalized = normalizeProfileObject({
       tone: " balanced ",
+      formality: "casually formal",
       sampleCount: 4,
       nested: { bad: true },
       humor: " dry ",
@@ -98,21 +99,34 @@ describe("profile object validation", () => {
     });
 
     expect(Object.keys(normalized).sort()).toEqual([...PROFILE_TRAIT_KEYS].sort());
-    expect(normalized.tone).toBe("balanced");
     expect(normalized.humor).toBe("dry");
     expect(normalized.vocabulary).toBe("");
     expect(normalized.transitionStyle).toBe("");
+    expect(normalized).not.toHaveProperty("tone");
+    expect(normalized).not.toHaveProperty("formality");
   });
 
   it("fills in missing canonical traits with empty strings", () => {
     const normalized = normalizeProfileObject({
-      tone: "direct",
-      humor: "",
+      vocabulary: "plain",
     });
 
-    expect(normalized.tone).toBe("direct");
+    expect(normalized.vocabulary).toBe("plain");
     expect(normalized.humor).toBe("");
     expect(normalized.rhythm).toBe("");
+  });
+
+  it("drops legacy tone and formality while preserving supported traits", () => {
+    const normalized = normalizeProfileObject({
+      tone: "warm",
+      formality: "casually formal",
+      humor: "dry",
+    });
+
+    expect(normalized.humor).toBe("dry");
+    expect(normalized.vocabulary).toBe("");
+    expect(normalized).not.toHaveProperty("tone");
+    expect(normalized).not.toHaveProperty("formality");
   });
 });
 

@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 import { filterProfileForContext, describeProfileFilter } from "./profileFilter.js";
 
 const FULL_PROFILE = {
-  tone: "warm and conversational",
   sentenceStructure: "short, punchy sentences with occasional fragments",
   vocabulary: "accessible, colloquial, avoids jargon",
   punctuationHabits: "heavy em-dash use, minimal semicolons",
@@ -63,9 +62,8 @@ describe("filterProfileForContext", () => {
       expect(result).not.toHaveProperty("emotionalRegister");
     });
 
-    test("preserves tone, vocabulary, sentenceStructure, perspective, rhythm, summary at Professional", () => {
+    test("preserves vocabulary, sentenceStructure, perspective, rhythm, summary at Professional", () => {
       const result = filterProfileForContext(FULL_PROFILE, { toneLevel: 3, formatPreset: "none" });
-      expect(result).toHaveProperty("tone");
       expect(result).toHaveProperty("vocabulary");
       expect(result).toHaveProperty("sentenceStructure");
       expect(result).toHaveProperty("perspective");
@@ -93,9 +91,8 @@ describe("filterProfileForContext", () => {
       expect(result).not.toHaveProperty("rhythm");
     });
 
-    test("preserves vocabulary, tone, quirks, perspective for twitter-post", () => {
+    test("preserves vocabulary, quirks, perspective for twitter-post", () => {
       const result = filterProfileForContext(FULL_PROFILE, { toneLevel: 0, formatPreset: "twitter-post" });
-      expect(result).toHaveProperty("tone");
       expect(result).toHaveProperty("vocabulary");
       expect(result).toHaveProperty("quirks");
       expect(result).toHaveProperty("perspective");
@@ -136,19 +133,18 @@ describe("filterProfileForContext", () => {
       expect(result).not.toHaveProperty("punctuationHabits");
       expect(result).not.toHaveProperty("quirks");
       expect(result).not.toHaveProperty("emotionalRegister");
-      // tone, vocabulary, sentenceStructure, perspective, rhythm, summary remain
-      expect(Object.keys(result)).toHaveLength(6);
+      // vocabulary, sentenceStructure, perspective, rhythm, summary remain
+      expect(Object.keys(result)).toHaveLength(5);
     });
 
-    test("Formal + twitter-post: suppresses 5 fields, leaves tone, vocabulary, perspective, summary", () => {
+    test("Formal + twitter-post: suppresses 5 fields, leaves vocabulary, perspective, summary", () => {
       const result = filterProfileForContext(FULL_PROFILE, { toneLevel: 4, formatPreset: "twitter-post" });
       expect(result).not.toHaveProperty("punctuationHabits");
       expect(result).not.toHaveProperty("quirks");
       expect(result).not.toHaveProperty("emotionalRegister");
       expect(result).not.toHaveProperty("sentenceStructure");
       expect(result).not.toHaveProperty("rhythm");
-      expect(Object.keys(result)).toHaveLength(4);
-      expect(result).toHaveProperty("tone");
+      expect(Object.keys(result)).toHaveLength(3);
       expect(result).toHaveProperty("vocabulary");
       expect(result).toHaveProperty("perspective");
       expect(result).toHaveProperty("summary");

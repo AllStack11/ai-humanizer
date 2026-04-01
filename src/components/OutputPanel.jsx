@@ -8,7 +8,7 @@ import { Button, Card, Spinner } from "./AppUI.jsx";
 import GenerationLoadingToast from "./GenerationLoadingToast.jsx";
 import { renderMarkdownToHtml } from "../utils/markdown.js";
 import { DynamicHighlighter, SelectionAwareHighlighter } from "../lib/tiptap-highlighter.js";
-import { buildClicheRanges } from "../utils/diff.js";
+import { buildClicheRanges, buildDiffHighlightRanges } from "../utils/diff.js";
 import {
   estimateTokenCount,
   expandSelectionToWordBoundaries,
@@ -58,6 +58,7 @@ function findEditorPosForVisibleOffset(doc, targetOffset) {
 function OutputDisplayEditor({
   outputText,
   cliches,
+  extraHighlightRanges = [],
   lockedHighlight,
   rawHighlight,
   isPartialStreaming,
@@ -78,7 +79,10 @@ function OutputDisplayEditor({
       DynamicHighlighter.configure({
         getRanges: (text) => {
           if (!text) return [];
-          return buildClicheRanges(text, cliches).map((r) => ({ start: r.start, end: r.end, kind: "cliche" }));
+          return [
+            ...buildClicheRanges(text, cliches).map((r) => ({ start: r.start, end: r.end, kind: "cliche" })),
+            ...extraHighlightRanges,
+          ];
         },
       }),
       SelectionAwareHighlighter,
@@ -105,7 +109,7 @@ function OutputDisplayEditor({
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     editor.view.dispatch(editor.state.tr.setMeta("dynamicHighlighterUpdate", true));
-  }, [editor, cliches]);
+  }, [editor, cliches, extraHighlightRanges]);
 
   // Drive the selection-lock decoration from props
   useEffect(() => {
@@ -601,8 +605,6 @@ export default function OutputPanel({
   outputLikelyHitTokenLimit = false,
   isStreaming,
   onOutputChange,
-  showDiff,
-  onToggleDiff,
   isEdited,
   readabilityBefore,
   readabilityAfter,
@@ -663,6 +665,10 @@ export default function OutputPanel({
   const outputTokenCount = outputUsage?.completionTokens ?? estimatedOutputTokens;
   const outputTokenIsEstimated = outputUsage?.completionTokens == null;
   const originalWords = useMemo(() => countPanelWords(originalText), [originalText]);
+  const compareDiffRanges = useMemo(() => {
+    if (!compareOpen) return { before: [], after: [] };
+    return buildDiffHighlightRanges(originalText || "", outputText || "");
+  }, [compareOpen, originalText, outputText]);
 
   useEffect(() => {
     if (!isStreaming) {
@@ -763,6 +769,7 @@ export default function OutputPanel({
                       <OutputDisplayEditor
                         outputText={originalText}
                         cliches={[]}
+                        extraHighlightRanges={compareDiffRanges.before}
                         lockedHighlight={null}
                         rawHighlight={null}
                         isPartialStreaming={false}
@@ -824,6 +831,7 @@ export default function OutputPanel({
                           <OutputDisplayEditor
                             outputText={outputText}
                             cliches={cliches}
+                            extraHighlightRanges={compareDiffRanges.after}
                             lockedHighlight={lockedHighlight}
                             rawHighlight={partialHighlight}
                             isPartialStreaming={isPartialStreaming}

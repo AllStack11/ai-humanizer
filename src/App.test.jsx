@@ -4,6 +4,7 @@ import App, {
   analyzeHumanizeInput,
   buildAiTermsStoragePayload,
   buildClicheRanges,
+  buildDiffHighlightRanges,
   buildDiffSegments,
   buildHumanizeUserPrompt,
   buildMirrorSegments,
@@ -89,7 +90,7 @@ describe("App utility functions", () => {
       personal: {
         id: "personal",
         name: "Personal",
-        profile: { tone: "balanced" },
+        profile: { vocabulary: "plain and direct" },
         sampleEntries: [{ id: 1, text: "old sample", type: "general" }],
         updatedAt: "2025-01-01T00:00:00.000Z",
       },
@@ -134,7 +135,7 @@ describe("App utility functions", () => {
       personal: {
         id: "personal",
         name: "Personal",
-        profile: { tone: "balanced" },
+        profile: { vocabulary: "plain and direct" },
         sampleEntries: [
           { id: 1, text: "How are you feeling about the launch?", type: "Questions / Q&A" },
           { id: 2, text: "I am excited and a bit nervous.", type: "q&a" },
@@ -152,7 +153,7 @@ describe("App utility functions", () => {
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "old sample", type: "general" }],
         },
       },
@@ -191,7 +192,7 @@ describe("App utility functions", () => {
       {
         styles: {
           "freelance-pitches": {
-            profile: { tone: "direct" },
+            profile: { vocabulary: "direct" },
             sampleEntries: [{ id: 1, text: "Pitch sample", type: "general" }],
           },
         },
@@ -267,6 +268,35 @@ describe("App utility functions", () => {
   test("buildDiffSegments reports insertions and deletions", () => {
     const segments = buildDiffSegments("alpha beta", "alpha gamma beta");
     expect(segments.some((seg) => seg.type === "added" && seg.text.includes("gamma"))).toBe(true);
+  });
+
+  test("buildDiffHighlightRanges returns pane-specific ranges and ignores whitespace-only diffs", () => {
+    expect(buildDiffHighlightRanges("alpha beta", "alpha  beta")).toEqual({
+      before: [],
+      after: [],
+    });
+
+    expect(buildDiffHighlightRanges("alpha beta", "alpha gamma beta")).toEqual({
+      before: [],
+      after: [{ start: 6, end: 11, class: "mark-diff-added" }],
+    });
+
+    expect(buildDiffHighlightRanges("alpha gamma beta", "alpha beta")).toEqual({
+      before: [{ start: 6, end: 11, class: "mark-diff-removed" }],
+      after: [],
+    });
+  });
+
+  test("buildDiffHighlightRanges aligns rewritten response chunks before marking additions", () => {
+    const before = "currently in llm output panel there is 4 buttons embedded within the editor. Move those buttons into a vertical toolbar that is rendered to the right of the llm output panel but inside the parent output panel";
+    const after = "Currently, four buttons are embedded within the LLM output panel editor. These buttons should be relocated to a vertical toolbar, positioned to the right of the LLM output panel while remaining within the parent output panel.";
+
+    const ranges = buildDiffHighlightRanges(before, after);
+    const highlightedText = ranges.after.map((range) => after.slice(range.start, range.end));
+
+    expect(ranges.before.length).toBeGreaterThan(0);
+    expect(ranges.after.length).toBeGreaterThan(0);
+    expect(highlightedText.join(" ")).toMatch(/four buttons|relocated|positioned|remaining/i);
   });
 
   test("readability, deltas, presets and profile health helpers", () => {
@@ -409,7 +439,7 @@ describe("App UI", () => {
       personal: {
         id: "personal",
         name: "Personal",
-        profile: { tone: "balanced" },
+        profile: { vocabulary: "plain and direct" },
         sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
         sampleCount: 1,
         updatedAt: new Date().toISOString(),
@@ -436,7 +466,7 @@ describe("App UI", () => {
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -480,7 +510,7 @@ describe("App UI", () => {
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -532,7 +562,7 @@ describe("App UI", () => {
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -571,7 +601,7 @@ describe("App UI", () => {
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -608,7 +638,7 @@ describe("App UI", () => {
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -658,7 +688,7 @@ describe("App UI", () => {
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -714,7 +744,7 @@ describe("App UI", () => {
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -752,7 +782,7 @@ describe("App UI", () => {
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -820,7 +850,7 @@ describe("App UI", () => {
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -875,7 +905,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -929,7 +959,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -988,7 +1018,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1016,7 +1046,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1045,7 +1075,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1126,7 +1156,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1184,7 +1214,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1242,7 +1272,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1315,7 +1345,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1377,7 +1407,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1433,7 +1463,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1492,7 +1522,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1555,7 +1585,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1601,7 +1631,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1649,7 +1679,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1707,7 +1737,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1768,7 +1798,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1817,7 +1847,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "enough content for personal", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1825,7 +1855,7 @@ hey how are you doing today?`;
         work: {
           id: "work",
           name: "Work",
-          profile: { tone: "professional" },
+          profile: { vocabulary: "professional and clear" },
           sampleEntries: [{ id: 2, text: "enough content for work", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1930,7 +1960,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -1981,7 +2011,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -2034,7 +2064,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -2042,7 +2072,7 @@ hey how are you doing today?`;
         work: {
           id: "work",
           name: "Work",
-          profile: { tone: "professional" },
+          profile: { vocabulary: "professional and clear" },
           sampleEntries: [{ id: 2, text: "this is another sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -2147,7 +2177,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -2175,7 +2205,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -2202,7 +2232,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -2226,7 +2256,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -2249,7 +2279,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -2278,7 +2308,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -2320,7 +2350,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),
@@ -2519,7 +2549,7 @@ hey how are you doing today?`;
         personal: {
           id: "personal",
           name: "Personal",
-          profile: { tone: "balanced" },
+          profile: { vocabulary: "plain and direct" },
           sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
           sampleCount: 1,
           updatedAt: new Date().toISOString(),

@@ -16,7 +16,7 @@ describe("WritingProfileModal", () => {
   test("renders all traits and edit controls even when values are empty", () => {
     renderWithMantine(
       <WritingProfileModal
-        profile={{ tone: "balanced" }}
+        profile={{ humor: "dry" }}
         health={null}
         profileLabel="Personal"
         hasProfile
@@ -28,10 +28,11 @@ describe("WritingProfileModal", () => {
       />
     );
 
-    expect(screen.getByText("Tone")).toBeInTheDocument();
+    expect(screen.queryByText("Tone")).not.toBeInTheDocument();
+    expect(screen.queryByText("Formality")).not.toBeInTheDocument();
     expect(screen.getByText("Humor")).toBeInTheDocument();
     expect(screen.getByText("Transition Style")).toBeInTheDocument();
-    expect(screen.getByText("balanced")).toBeInTheDocument();
+    expect(screen.getByText("dry")).toBeInTheDocument();
     expect(screen.getAllByText("Not set").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Edit Humor" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit Transition Style" })).toBeInTheDocument();
@@ -42,7 +43,7 @@ describe("WritingProfileModal", () => {
 
     renderWithMantine(
       <WritingProfileModal
-        profile={{ tone: "balanced" }}
+        profile={{ humor: "dry" }}
         health={null}
         profileLabel="Personal"
         hasProfile

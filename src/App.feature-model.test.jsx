@@ -72,7 +72,7 @@ describe("Feature model routing", () => {
       personal: {
         id: "personal",
         name: "Personal",
-        profile: { tone: "balanced" },
+        profile: { vocabulary: "plain and direct" },
         sampleEntries: [{ id: 1, text: "this is a sample entry with enough content", type: "general" }],
         sampleCount: 1,
         updatedAt: new Date().toISOString(),

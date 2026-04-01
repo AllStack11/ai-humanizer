@@ -13,7 +13,6 @@ export const WRITING_SAMPLE_TYPES = [
 export const DEFAULT_SAMPLE_TYPE = WRITING_SAMPLE_TYPES[0].value;
 
 export const PROFILE_TRAITS = [
-  { label: "Tone", key: "tone" },
   { label: "Emotional Register", key: "emotionalRegister" },
   { label: "Vocabulary", key: "vocabulary" },
   { label: "Perspective", key: "perspective" },
@@ -21,7 +20,6 @@ export const PROFILE_TRAITS = [
   { label: "Rhythm", key: "rhythm" },
   { label: "Punctuation Habits", key: "punctuationHabits" },
   { label: "Quirks", key: "quirks" },
-  { label: "Formality", key: "formality" },
   { label: "Humor", key: "humor" },
   { label: "Transition Style", key: "transitionStyle" },
 ];

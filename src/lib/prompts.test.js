@@ -63,8 +63,8 @@ describe("buildMetaBlock", () => {
 
 describe("renderProfileAsProse", () => {
   test("renders each trait as a bullet line", () => {
-    const prose = renderProfileAsProse({ tone: "dry and direct", vocabulary: "plain Anglo-Saxon" });
-    expect(prose).toContain("- Tone: dry and direct");
+    const prose = renderProfileAsProse({ humor: "dry and direct", vocabulary: "plain Anglo-Saxon" });
+    expect(prose).toContain("- Humor: dry and direct");
     expect(prose).toContain("- Vocabulary: plain Anglo-Saxon");
   });
 
@@ -74,14 +74,14 @@ describe("renderProfileAsProse", () => {
   });
 
   test("skips keys with empty or non-string values", () => {
-    const prose = renderProfileAsProse({ tone: "warm", quirks: "", humor: null });
-    expect(prose).toContain("- Tone: warm");
+    const prose = renderProfileAsProse({ vocabulary: "warm", quirks: "", humor: null });
+    expect(prose).toContain("- Vocabulary: warm");
     expect(prose).not.toContain("quirks");
     expect(prose).not.toContain("humor");
   });
 
   test("does not contain JSON braces or quoted keys", () => {
-    const prose = renderProfileAsProse({ tone: "casual", formality: "informal" });
+    const prose = renderProfileAsProse({ humor: "casual", vocabulary: "informal" });
     expect(prose).not.toContain("{");
     expect(prose).not.toContain('"tone"');
   });
@@ -163,11 +163,11 @@ describe("selectCliches", () => {
 // ─── HUMANIZE_SYS ─────────────────────────────────────────────────────────────
 
 describe("HUMANIZE_SYS", () => {
-  const profile = { tone: "dry and direct", vocabulary: "plain Anglo-Saxon" };
+  const profile = { humor: "dry and direct", vocabulary: "plain Anglo-Saxon" };
 
   test("renders profile as prose bullets, not JSON", () => {
     const prompt = HUMANIZE_SYS(profile, 2, []);
-    expect(prompt).toContain("- Tone: dry and direct");
+    expect(prompt).toContain("- Humor: dry and direct");
     expect(prompt).toContain("- Vocabulary: plain Anglo-Saxon");
     expect(prompt).not.toContain('{"tone"');
   });
@@ -244,11 +244,11 @@ describe("HUMANIZE_SYS", () => {
 // ─── ELABORATE_SYS ────────────────────────────────────────────────────────────
 
 describe("ELABORATE_SYS", () => {
-  const profile = { tone: "analytical", rhythm: "even measured cadence" };
+  const profile = { vocabulary: "analytical", rhythm: "even measured cadence" };
 
   test("renders profile as prose bullets", () => {
     const prompt = ELABORATE_SYS(profile, 2);
-    expect(prompt).toContain("- Tone: analytical");
+    expect(prompt).toContain("- Vocabulary: analytical");
     expect(prompt).not.toContain('{"tone"');
   });
 
@@ -340,11 +340,11 @@ describe("elaborate prompt helpers", () => {
 // ─── PARTIAL_REGEN_SYS ────────────────────────────────────────────────────────
 
 describe("PARTIAL_REGEN_SYS", () => {
-  const profile = { tone: "casual", sentenceStructure: "short punchy" };
+  const profile = { humor: "casual", sentenceStructure: "short punchy" };
 
   test("renders profile as prose bullets", () => {
     const prompt = PARTIAL_REGEN_SYS(profile, 1, []);
-    expect(prompt).toContain("- Tone: casual");
+    expect(prompt).toContain("- Humor: casual");
     expect(prompt).not.toContain('{"tone"');
   });
 
@@ -451,7 +451,7 @@ describe("cliché prioritization in generated prompts", () => {
   test("tier-1 clichés appear before non-tier-1 in humanize prompt", () => {
     // "delve" is tier-1, "in conclusion" is not
     const cliches = ["in conclusion", "delve"];
-    const prompt = HUMANIZE_SYS({ tone: "casual" }, 2, cliches);
+    const prompt = HUMANIZE_SYS({ humor: "casual" }, 2, cliches);
     const delvePos = prompt.indexOf('"delve"');
     const conclusionPos = prompt.indexOf('"in conclusion"');
     expect(delvePos).toBeGreaterThan(-1);
@@ -464,7 +464,7 @@ describe("cliché prioritization in generated prompts", () => {
       generatedTerms: ["in conclusion", "moving forward", "delve"],
       customTerms: ["agentic slop"],
     };
-    const prompt = HUMANIZE_SYS({ tone: "casual" }, 2, cliches);
+    const prompt = HUMANIZE_SYS({ humor: "casual" }, 2, cliches);
     const delvePos = prompt.indexOf('"delve"');
     const customPos = prompt.indexOf('"agentic slop"');
     const conclusionPos = prompt.indexOf('"in conclusion"');

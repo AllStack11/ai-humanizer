@@ -133,7 +133,6 @@ export function buildAiTermGuidance(cliches, budget = 40) {
 export const STYLE_ANALYZE_SYS = `Analyze the writing samples below (each labeled with its form) and return ONLY raw JSON (no markdown, no explanation).
 
 Field guidance — keep each value concise (1–2 phrases max):
-- tone: overall attitude and affect (e.g. "dry and self-deprecating", "warm and direct")
 - sentenceStructure: dominant sentence pattern (e.g. "short punchy sentences with occasional run-ons", "long subordinate clauses, rarely fragments")
 - vocabulary: word-choice character (e.g. "plain Anglo-Saxon, avoids jargon", "technical but accessible, loves precise nouns")
 - punctuationHabits: notable punctuation tendencies (e.g. "heavy em-dash use, comma-light", "Oxford comma always, ellipsis for trailing thought")
@@ -141,7 +140,6 @@ Field guidance — keep each value concise (1–2 phrases max):
 - perspective: typical point-of-view stance (e.g. "strong first-person, shares personal anecdotes", "observer stance, rarely uses 'I'")
 - rhythm: pacing and flow feel (e.g. "staccato bursts then long exhales", "even measured cadence throughout")
 - emotionalRegister: emotional texture (e.g. "restrained but warm", "openly enthusiastic, occasionally vulnerable")
-- formality: natural formality spectrum (e.g. "casually formal — professional without stiffness", "very informal, treats reader as a friend")
 - humor: comedic voice if present (e.g. "deadpan asides, self-aware irony", "none — earnest throughout")
 - transitionStyle: how ideas link across sentences and paragraphs (e.g. "abrupt pivots, trusts reader to follow", "explicit signposting with 'but', 'so', 'here's the thing'")
 - summary: 2-sentence plain-English description of the overall voice
@@ -149,12 +147,12 @@ Field guidance — keep each value concise (1–2 phrases max):
 If samples are sparse (1–2), describe only what is clearly evidenced; use shorter phrases rather than guessing. If samples are contradictory across forms, describe the dominant pattern and note the variation.
 
 Return schema:
-{"tone":"...","sentenceStructure":"...","vocabulary":"...","punctuationHabits":"...","quirks":"...","perspective":"...","rhythm":"...","emotionalRegister":"...","formality":"...","humor":"...","transitionStyle":"...","summary":"..."}`;
+{"sentenceStructure":"...","vocabulary":"...","punctuationHabits":"...","quirks":"...","perspective":"...","rhythm":"...","emotionalRegister":"...","humor":"...","transitionStyle":"...","summary":"..."}`;
 
 export const STYLE_MERGE_SYS = `You are evolving an existing writer voice profile by incorporating new writing samples (each labeled with its form).
 
 Trait stability guide — how to handle each field when new samples conflict with the existing profile:
-- STABLE traits (reflect the writer's core identity — update only if new evidence is strong and consistent): tone, vocabulary, perspective, emotionalRegister, formality, humor
+- STABLE traits (reflect the writer's core identity — update only if new evidence is strong and consistent): vocabulary, perspective, emotionalRegister, humor
 - CONTEXTUAL traits (legitimately vary by writing form — blend across forms, note dominant pattern): sentenceStructure, rhythm, punctuationHabits, transitionStyle, quirks
 
 Merge rules:
@@ -164,7 +162,7 @@ Merge rules:
 4. Keep all values concise (1–2 phrases). Update the summary to reflect the evolved understanding.
 
 Return ONLY raw JSON (no markdown):
-{"tone":"...","sentenceStructure":"...","vocabulary":"...","punctuationHabits":"...","quirks":"...","perspective":"...","rhythm":"...","emotionalRegister":"...","formality":"...","humor":"...","transitionStyle":"...","summary":"2-sentence summary"}`;
+{"sentenceStructure":"...","vocabulary":"...","punctuationHabits":"...","quirks":"...","perspective":"...","rhythm":"...","emotionalRegister":"...","humor":"...","transitionStyle":"...","summary":"2-sentence summary"}`;
 
 // ─── Generation prompts ───────────────────────────────────────────────────────
 
@@ -175,7 +173,7 @@ export const HUMANIZE_SYS = (profile, tone, cliches, profileName, meta = null) =
 Writing context: "${profileName}" profile
 Voice profile:
 ${renderProfileAsProse(profile)}
-${metaBlock}When voice and tone conflict, voice wins.
+${metaBlock}Use the profile to preserve the writer's voice, and follow the requested tone target from the user prompt.
 
 How to rewrite: Do not rephrase word-by-word. Instead, internalize what the source is saying, then write it fresh as this person would naturally express it — using their vocabulary, cadence, sentence patterns, and quirks.
 Constraints: Preserve all meaning, intent, point of view, and speech act type.
@@ -246,7 +244,7 @@ ${metaBlock}
 
 ${depthGuidance}
 Elaboration mode: Add depth, specificity, examples, or nuance to the existing thought. Do NOT repeat what was already said, do NOT summarize it, and do NOT continue the narrative past the source's natural scope — deepen within it.
-Voice: Write in this person's natural style as described in the profile. Do not shift register or adopt a more formal/generic tone.
+Voice: Write in this person's natural style as described in the profile. Keep the voice specific and avoid flattening it into generic prose.
 ${presetLine}
 ${formatGuidance}
 The source text is wrapped in <source_text> tags in the user message.

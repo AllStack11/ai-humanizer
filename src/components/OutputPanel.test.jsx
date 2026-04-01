@@ -3,6 +3,8 @@ import OutputPanel from "./OutputPanel.jsx";
 
 let mockEditor = null;
 let mockEditorConfigs = [];
+let mockDynamicHighlighterConfigs = [];
+const buildDiffHighlightRangesMock = vi.fn(() => ({ before: [], after: [] }));
 
 function createMockEditor(text, selection = { from: 0, to: 0 }) {
   const listeners = new Map();
@@ -88,13 +90,17 @@ vi.mock("@tiptap/extension-placeholder", () => ({
 
 vi.mock("../lib/tiptap-highlighter.js", () => ({
   DynamicHighlighter: {
-    configure: () => ({}),
+    configure: (config) => {
+      mockDynamicHighlighterConfigs.push(config);
+      return {};
+    },
   },
   SelectionAwareHighlighter: {},
 }));
 
 vi.mock("../utils/diff.js", () => ({
   buildClicheRanges: () => [],
+  buildDiffHighlightRanges: (...args) => buildDiffHighlightRangesMock(...args),
 }));
 
 vi.mock("../utils/markdown.js", async () => {
@@ -138,8 +144,6 @@ const baseProps = {
   outputUsage: null,
   isStreaming: false,
   onOutputChange: vi.fn(),
-  showDiff: false,
-  onToggleDiff: vi.fn(),
   isEdited: false,
   readabilityBefore: 0,
   readabilityAfter: 0,
@@ -198,7 +202,9 @@ describe("OutputPanel partial regeneration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEditorConfigs = [];
+    mockDynamicHighlighterConfigs = [];
     mockEditor = createMockEditor(baseProps.outputText, { from: 2, to: baseProps.outputText.length - 2 });
+    buildDiffHighlightRangesMock.mockReturnValue({ before: [], after: [] });
 
     vi.spyOn(window, "getSelection").mockReturnValue({
       isCollapsed: false,
@@ -367,5 +373,75 @@ describe("OutputPanel partial regeneration", () => {
     render(<OutputPanel {...baseProps} outputLikelyHitTokenLimit />);
 
     expect(screen.getByLabelText("Response may be truncated by token limit")).toHaveTextContent("Near token limit");
+  });
+
+  test("only computes diff ranges after compare view opens", () => {
+    render(<OutputPanel {...baseProps} originalText="alpha beta" outputText="alpha gamma beta" />);
+
+    expect(buildDiffHighlightRangesMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText("Open side by side comparison"));
+
+    expect(buildDiffHighlightRangesMock).toHaveBeenCalledWith("alpha beta", "alpha gamma beta");
+  });
+
+  test("applies removed and added ranges to the compare editors", () => {
+    buildDiffHighlightRangesMock.mockReturnValue({
+      before: [{ start: 6, end: 10, class: "mark-diff-removed" }],
+      after: [{ start: 6, end: 11, class: "mark-diff-added" }],
+    });
+
+    render(<OutputPanel {...baseProps} originalText="alpha beta" outputText="alpha gamma" />);
+    fireEvent.click(screen.getByLabelText("Open side by side comparison"));
+
+    const compareConfigs = mockDynamicHighlighterConfigs.slice(-2);
+    expect(compareConfigs).toHaveLength(2);
+
+    const originalRanges = compareConfigs[0].getRanges("alpha beta");
+    const outputRanges = compareConfigs[1].getRanges("alpha gamma");
+
+    expect(originalRanges).toEqual([{ start: 6, end: 10, class: "mark-diff-removed" }]);
+    expect(outputRanges).toEqual([{ start: 6, end: 11, class: "mark-diff-added" }]);
+  });
+
+  test("keeps partial regenerate selection highlights working while compare view is open", async () => {
+    const { rerender } = render(
+      <OutputPanel
+        {...baseProps}
+        originalText="alpha beta"
+        outputText="alpha gamma"
+        isPartialStreaming
+        partialHighlight={{ rawStart: 0, rawEnd: 5, phase: "pending" }}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText("Open side by side comparison"));
+
+    await waitFor(() => {
+      expect(mockEditor.__dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: "selectionLock",
+          value: expect.objectContaining({ className: "mark-regen-pending" }),
+        })
+      );
+    });
+
+    rerender(
+      <OutputPanel
+        {...baseProps}
+        originalText="alpha beta"
+        outputText="alpha gamma"
+        partialHighlight={{ rawStart: 0, rawEnd: 5, phase: "completed" }}
+      />
+    );
+
+    await waitFor(() => {
+      expect(mockEditor.__dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: "selectionLock",
+          value: expect.objectContaining({ className: "mark-selection-completed" }),
+        })
+      );
+    });
   });
 });
